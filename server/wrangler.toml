@@ -1,0 +1,21 @@
+# Cloudflare Workers + Durable Objects 版の対戦サーバー設定
+# デプロイ: npx wrangler login → npm run deploy -w server
+name = "kinggnu-server"
+main = "src/worker.ts"
+compatibility_date = "2024-11-01"
+
+[vars]
+# 許可するフロントエンドのオリジン（カンマ区切り）。GitHub Pages の URL を指定する
+ALLOWED_ORIGINS = "*"
+
+[[durable_objects.bindings]]
+name = "GAME"
+class_name = "GameRoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoomDO"]
+
+# CPU 時間の上限（ミリ秒）。リアルタイム物理のため既定の 30 秒より余裕を持たせる（有料プランのみ有効）
+# [limits]
+# cpu_ms = 300000
