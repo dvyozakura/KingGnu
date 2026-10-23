@@ -16,7 +16,7 @@ import { HornPreview } from '../components/HornPreview';
 import { sfx, unlockAudio } from '../game/audio';
 import { BattleResult } from '../game/source';
 import { loadNickname, saveNickname } from '../game/storage';
-import { NetClient, defaultServerUrl, saveServerUrl } from '../net/client';
+import { DEFAULT_SERVER_URL, NetClient, defaultServerUrl, saveServerUrl } from '../net/client';
 import { OnlineSource } from '../net/onlineSource';
 import { Battle } from './Battle';
 import { Result } from './Result';
@@ -51,7 +51,7 @@ const ERRORS: Record<string, string> = {
 export function Online({ horn, onBack, onEditHorn }: Props) {
   const [name, setName] = useState(loadNickname());
   const [url, setUrl] = useState(defaultServerUrl());
-  const [showAdv, setShowAdv] = useState(!defaultServerUrl());
+  const [showAdv, setShowAdv] = useState(false);
   const [code, setCode] = useState('');
   const [phase, setPhase] = useState<Phase>('menu');
   const [error, setError] = useState('');
@@ -125,8 +125,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
   const ensureClient = async (): Promise<NetClient> => {
     const existing = clientRef.current;
     if (existing && existing.status === 'open') return existing;
-    if (!url) throw new Error('サーバーURLが設定されていません');
-    const cl = new NetClient(url);
+    const cl = new NetClient(url || DEFAULT_SERVER_URL);
     clientRef.current = cl;
     cl.on(handle);
     cl.onStatus((s) => {
@@ -171,7 +170,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
       return;
     }
     saveNickname(name.trim());
-    saveServerUrl(url === (import.meta.env.VITE_SERVER_URL ?? '') ? '' : url);
+    saveServerUrl(url);
     setPhase('connecting');
     try {
       const cl = await ensureClient();
@@ -279,7 +278,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
               <label>
                 WebSocket URL
                 <input value={url} onChange={(e) => setUrl(e.target.value.trim())} placeholder="wss://your-server.example.com/ws" />
-                <span className="hint">ローカル開発: ws://localhost:8787/ws（npm run dev:server）</span>
+                <span className="hint">既定: {DEFAULT_SERVER_URL}（空にすると既定に戻ります）</span>
               </label>
             )}
           </div>

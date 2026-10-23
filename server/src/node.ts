@@ -1,14 +1,19 @@
 /**
- * Node.js 常駐 WebSocket サーバー（推奨構成）
- *   PORT=8787 ALLOWED_ORIGINS=https://<user>.github.io node dist/server.mjs
+ * Node.js 常駐 WebSocket サーバー
+ *   既定: 127.0.0.1:8787 で待ち受け（Cloudflare Tunnel 経由でだけ外部公開する）
+ *   環境変数: PORT / HOST / ALLOWED_ORIGINS（カンマ区切り）/ MAX_CONN_PER_IP
  */
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { MAX_PACKET_BYTES } from '@kinggnu/shared';
 import { Client, GameServer } from './core/gameServer';
 
 const PORT = Number(process.env.PORT ?? 8787);
-const ORIGINS = (process.env.ALLOWED_ORIGINS ?? '*')
+/** トンネル（cloudflared）からだけ届くよう、既定はループバックのみ */
+const HOST = process.env.HOST ?? '127.0.0.1';
+/** 許可するフロントエンドの Origin（パスは付けない） */
+const DEFAULT_ORIGINS = 'https://dvyozakura.github.io,http://localhost:5173';
+const ORIGINS = (process.env.ALLOWED_ORIGINS ?? DEFAULT_ORIGINS)
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -28,6 +33,15 @@ const http = createServer((req, res) => {
 
 const perIp = new Map<string, number>();
 
+/** Cloudflare Tunnel 経由では接続元が 127.0.0.1 になるので、Cloudflare が付ける実IPヘッダーを使う */
+function clientIp(req: IncomingMessage): string {
+  const cf = req.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf) return cf;
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff) return xff.split(',')[0].trim();
+  return req.socket.remoteAddress ?? '';
+}
+
 const wss = new WebSocketServer({
   server: http,
   path: '/ws',
@@ -35,7 +49,7 @@ const wss = new WebSocketServer({
   verifyClient: (info, cb) => {
     const origin = info.origin ?? '';
     if (!ORIGINS.includes('*') && !ORIGINS.includes(origin)) return cb(false, 403, 'origin not allowed');
-    const ip = (info.req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0].trim() ?? info.req.socket.remoteAddress ?? '';
+    const ip = clientIp(info.req);
     if ((perIp.get(ip) ?? 0) >= MAX_PER_IP) return cb(false, 429, 'too many connections');
     cb(true);
   },
@@ -47,7 +61,7 @@ game.onReattach = (from, to) => {
 };
 
 wss.on('connection', (ws, req) => {
-  const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0].trim() ?? req.socket.remoteAddress ?? '';
+  const ip = clientIp(req);
   perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
   const client = game.connect({
     send: (d) => {
@@ -82,4 +96,11 @@ setInterval(() => {
   game.tick(dt);
 }, 1000 / 60);
 
-http.listen(PORT, () => console.log(`KingGnu server listening on :${PORT} (ws path /ws, origins: ${ORIGINS.join(',')})`));
+http.on('error', (e: NodeJS.ErrnoException) => {
+  if (e.code === 'EADDRINUSE') console.error(`ポート ${PORT} は既に使われています。PORT 環境変数で別の番号を指定してください。`);
+  else console.error(e);
+  process.exit(1);
+});
+http.listen(PORT, HOST, () =>
+  console.log(`KingGnu server listening on http://${HOST}:${PORT} (ws path /ws, origins: ${ORIGINS.join(', ')})`),
+);

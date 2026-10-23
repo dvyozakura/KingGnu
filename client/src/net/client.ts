@@ -3,7 +3,15 @@ import { ClientMsg, ServerMsg } from '@kinggnu/shared';
 
 export type NetStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
-const URL_KEY = 'kinggnu.serverUrl';
+/** v2: 以前保存された一時URL（trycloudflare など）は使わない */
+const URL_KEY = 'kinggnu.serverUrl.v2';
+
+/**
+ * 既定の接続先。
+ *  - 本番ビルド（GitHub Pages）: client/.env.production の VITE_SERVER_URL（wss://kinggnu.yein.jp）
+ *  - 開発（npm run dev）       : 未設定なので手元の対戦サーバー ws://localhost:8787/ws
+ */
+export const DEFAULT_SERVER_URL: string = import.meta.env.VITE_SERVER_URL ?? 'ws://localhost:8787/ws';
 
 export function defaultServerUrl(): string {
   try {
@@ -12,16 +20,15 @@ export function defaultServerUrl(): string {
   } catch {
     /* ignore */
   }
-  const env = (import.meta.env.VITE_SERVER_URL as string | undefined) ?? '';
-  if (env) return env;
-  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return `ws://${location.hostname}:8787/ws`;
-  return '';
+  return DEFAULT_SERVER_URL;
 }
 
+/** 手入力したURLを保存（既定と同じなら保存しない） */
 export function saveServerUrl(url: string) {
   try {
-    if (url) localStorage.setItem(URL_KEY, url);
+    if (url && normalizeServerUrl(url) !== normalizeServerUrl(DEFAULT_SERVER_URL)) localStorage.setItem(URL_KEY, url);
     else localStorage.removeItem(URL_KEY);
+    localStorage.removeItem('kinggnu.serverUrl');
   } catch {
     /* ignore */
   }

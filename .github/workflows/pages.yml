@@ -30,8 +30,7 @@ jobs:
         run: npm test
       - name: Build client
         env:
-          # Settings → Secrets and variables → Actions → Variables に VITE_SERVER_URL を登録
-          VITE_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+          # 接続先サーバーは client/.env.production の VITE_SERVER_URL を使う
           VITE_BASE: /${{ github.event.repository.name }}/
         run: npm run build:client
       - name: SPA fallback

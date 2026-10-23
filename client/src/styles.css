@@ -838,3 +838,17 @@ canvas {
 .toast.fade.out {
   opacity: 0;
 }
+
+/* 文字リンク風ボタン：横いっぱいに伸びて枠が出ないように */
+button.link {
+  align-self: center;
+  width: auto;
+  border-radius: 6px;
+}
+button.link:focus {
+  outline: none;
+}
+button.link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

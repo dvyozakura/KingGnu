@@ -178,6 +178,28 @@ npx wrangler deploy
 `wss://kinggnu-server.<アカウント>.workers.dev/ws` を `VITE_SERVER_URL` に設定します。
 GitHub Actions から出す場合は Secrets に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を登録し、`Deploy server to Cloudflare` ワークフローを手動実行します。**トークンや API キーはリポジトリに含めないでください。**
 
+## 自宅の Windows PC で対戦サーバーを動かす（Cloudflare Tunnel）
+
+既存のトンネル（例: yein-pc）に Public Hostname を追加して公開する構成です。
+
+| 項目 | 値 |
+|---|---|
+| 対戦サーバー | `127.0.0.1:8787`（PC 内からのみ。外部へはトンネル経由だけ） |
+| Public Hostname | `kinggnu.yein.jp` → `http://127.0.0.1:8787` |
+| クライアントの接続先 | `client/.env.production` の `VITE_SERVER_URL=wss://kinggnu.yein.jp`（`/ws` は自動で補う） |
+| 許可する Origin | `https://dvyozakura.github.io`, `http://localhost:5173` |
+
+ウィンドウを開かずにバックグラウンドで動かすスクリプトを `server/windows/` に用意しています。
+
+| ファイル | 役割 |
+|---|---|
+| `start-hidden.vbs` | ダブルクリックで、窓なしでサーバーを起動（落ちても自動再起動・最新コードを自動ビルド） |
+| `stop-server.cmd` | サーバーを止める |
+| `install-autostart.ps1` | Windows にサインインしたら自動で起動するよう登録（管理者権限不要） |
+| `uninstall-autostart.ps1` | 自動起動の登録を外す |
+
+ログは `server/logs/server.log`、動作確認は http://127.0.0.1:8787/health 。ポートを変える場合は環境変数 `PORT` を設定し、Public Hostname 側も合わせてください。
+
 ## 8. 使用技術
 
 - TypeScript / React 18 / Vite 5 / HTML Canvas 2D
