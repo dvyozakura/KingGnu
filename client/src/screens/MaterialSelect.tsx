@@ -1,8 +1,10 @@
-/** 材質選択画面：6種類のカード + しなりが分かる物理プレビュー */
+/** 材質選択画面：材質カード + しなりが分かる物理プレビュー */
 import { useMemo, useState } from 'react';
-import { MATERIALS, MATERIAL_IDS, MaterialId, Poly, buildHornModel, computeMaxHP, materialBars } from '@kinggnu/shared';
+import { MATERIALS, MATERIAL_IDS, MaterialId, Poly, buildHornModel, computeMaxHP } from '@kinggnu/shared';
 import { HornPreview } from '../components/HornPreview';
+import { MaterialBars, materialBadge } from '../components/MaterialBars';
 import { sfx } from '../game/audio';
+import { Guide } from './Guide';
 
 interface Props {
   polygon: Poly;
@@ -10,21 +12,14 @@ interface Props {
   onDone: (m: MaterialId) => void;
   onBack: () => void;
   nextLabel: string;
+  /** 選べない材質（オンラインで使用禁止など） */
+  disabled?: MaterialId[];
+  disabledLabel?: string;
 }
 
-function Bar({ label, v, color }: { label: string; v: number; color: string }) {
-  return (
-    <div className="bar-row">
-      <span>{label}</span>
-      <div className="meter">
-        <div style={{ width: `${Math.round(Math.max(0.03, v) * 100)}%`, background: color }} />
-      </div>
-    </div>
-  );
-}
-
-export function MaterialSelect({ polygon, initial, onDone, onBack, nextLabel }: Props) {
-  const [sel, setSel] = useState<MaterialId>(initial);
+export function MaterialSelect({ polygon, initial, onDone, onBack, nextLabel, disabled = [], disabledLabel = '使用不可' }: Props) {
+  const [sel, setSel] = useState<MaterialId>(disabled.includes(initial) ? (MATERIAL_IDS.find((k) => !disabled.includes(k)) ?? initial) : initial);
+  const [guide, setGuide] = useState(false);
   const stats = useMemo(() => buildHornModel(polygon).stats, [polygon]);
   const m = MATERIALS[sel];
   return (
@@ -34,17 +29,28 @@ export function MaterialSelect({ polygon, initial, onDone, onBack, nextLabel }: 
           ← 角を描き直す
         </button>
         <h2>材質を選ぶ</h2>
-        <span />
+        <button
+          className="ghost"
+          onClick={() => {
+            sfx.click();
+            setGuide(true);
+          }}
+        >
+          📖 図説
+        </button>
       </header>
       <div className="material-body">
         <div className="cards">
           {MATERIAL_IDS.map((id) => {
             const mat = MATERIALS[id];
-            const b = materialBars(id);
+            const badge = materialBadge(id);
+            const off = disabled.includes(id);
             return (
               <button
                 key={id}
-                className={`card mat-${id} ${sel === id ? 'selected' : ''}`}
+                disabled={off}
+                title={off ? disabledLabel : undefined}
+                className={`card mat-${id} ${sel === id ? 'selected' : ''} ${off ? 'banned' : ''}`}
                 onClick={() => {
                   sfx.click();
                   setSel(id);
@@ -53,12 +59,9 @@ export function MaterialSelect({ polygon, initial, onDone, onBack, nextLabel }: 
                 <div className="swatch" style={{ background: mat.color.fill, opacity: id === 'glass' ? 0.7 : 1 }} />
                 <div className="card-title">
                   {mat.name}
-                  {id === 'azuki' && <span className="badge">BOSS</span>}
+                  {off ? <span className="badge ban">{disabledLabel}</span> : badge && <span className="badge">{badge}</span>}
                 </div>
-                <Bar label="硬度" v={b.hardness} color="#f2c14e" />
-                <Bar label="しなり" v={b.flex} color="#5bd66b" />
-                <Bar label="HP" v={b.hp} color="#ef5350" />
-                <Bar label="反作用" v={b.recoil} color="#b388ff" />
+                <MaterialBars id={id} />
               </button>
             );
           })}
@@ -67,6 +70,11 @@ export function MaterialSelect({ polygon, initial, onDone, onBack, nextLabel }: 
           <HornPreview polygon={polygon} material={sel} width={300} height={240} animate />
           <h3>{m.name}</h3>
           <p>{m.description}</p>
+          <ul className="traits compact">
+            {m.traits.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
           <table className="stats">
             <tbody>
               <tr>
@@ -81,6 +89,10 @@ export function MaterialSelect({ polygon, initial, onDone, onBack, nextLabel }: 
                 <th>反作用倍率</th>
                 <td>×{m.recoilMultiplier}</td>
               </tr>
+              <tr>
+                <th>速さ</th>
+                <td>×{m.speed}</td>
+              </tr>
             </tbody>
           </table>
           <button
@@ -94,6 +106,7 @@ export function MaterialSelect({ polygon, initial, onDone, onBack, nextLabel }: 
           </button>
         </div>
       </div>
+      {guide && <Guide polygon={polygon} initial={sel} onClose={() => setGuide(false)} />}
     </div>
   );
 }

@@ -62,6 +62,8 @@ export class NetClient {
   private wantOpen = false;
   /** 再接続時に resume を送るか（ルーム/試合中） */
   resumable = false;
+  /** 最後に送った hello。再接続で復帰できなかったとき（サーバー再起動など）に送り直す */
+  hello: ClientMsg | null = null;
 
   constructor(public url: string) {
     this.url = normalizeServerUrl(url);
@@ -106,6 +108,8 @@ export class NetClient {
         }
         if (msg.t === 'pong') this.rtt = this.rtt ? this.rtt * 0.8 + (performance.now() - msg.ts) * 0.2 : performance.now() - msg.ts;
         if (msg.t === 'welcome') this.token = msg.token;
+        // 復帰に失敗（サーバー再起動でトークンが消えた等）→ 新しい接続として名乗り直す
+        if (msg.t === 'err' && (msg.code === 'resume_failed' || msg.code === 'no_hello') && this.hello) this.send(this.hello);
         for (const l of this.listeners) l(msg);
       };
       ws.onerror = () => {
@@ -134,6 +138,11 @@ export class NetClient {
   private setStatus(s: NetStatus) {
     this.status = s;
     for (const l of this.statusListeners) l(s);
+  }
+
+  sendHello(msg: Extract<ClientMsg, { t: 'hello' }>) {
+    this.hello = msg;
+    this.send(msg);
   }
 
   send(msg: ClientMsg) {

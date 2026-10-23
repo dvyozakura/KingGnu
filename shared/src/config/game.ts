@@ -88,7 +88,7 @@ export const DAMAGE = {
   minClosingSpeed: 140,
   direct: 0.0046,
   whip: 1.6e-5,
-  recoil: 0.0011,
+  recoil: 0.00045,
   bodyRestitution: 0.25,
   headMultiplier: 1.2,
   guardMultiplier: 0.62,
@@ -103,8 +103,10 @@ export const DAMAGE = {
   softCap: 260,
   knockback: 1.0,
   clashStress: 0.0011,
-  clashRecoil: 0.0005,
-  crackedRecoilMultiplier: 1.5,
+  clashRecoil: 0.0002,
+  crackedRecoilMultiplier: 1.3,
+  /** ダメージ計算に使う速度の上限（物理が暴れて異常な速度が出てもダメージ・反作用が爆発しないように） */
+  maxSpeed: 2500,
 } as const;
 
 export const MELT = {
@@ -117,4 +119,29 @@ export const MELT = {
   lengthLoss: 0.85,
   lengthSteps: 14,
   stiffnessLoss: 0.25,
+} as const;
+
+/** 材質どうしの特殊な相互作用（調整用） */
+export const INTERACT = {
+  /** 炎の角が相手の体・頭に触れている間の毎秒ダメージ */
+  burnContactDps: 60,
+  /** 炎の角が相手の角に触れている間の毎秒ダメージ */
+  burnHornDps: 25,
+  /** 炎に触れたあと燃え続ける時間（秒）と毎秒ダメージ */
+  burnAfterTime: 1.5,
+  burnAfterDps: 16,
+  /** 炎があずきのアイスに触れている間の溶け（秒換算 / 秒） */
+  fireMeltRate: 1.5,
+  /** コルクがあずきのアイスに触れている間の溶け（秒換算 / 秒） */
+  corkMeltRate: 1.2,
+  /** コルクがあずきのアイスに当たった（ぶつかった）ときの追加の溶け（秒換算） */
+  corkMeltImpact: 0.8,
+  /** 珊瑚 → ゴムのダメージ倍率 */
+  coralVsRubber: 1.8,
+  /** 金が曲がり始める相手の硬さ */
+  goldBendHardness: 0.5,
+  /** 金：ストレス→曲がる角度(rad)の係数・1回の上限・1関節の累積上限 */
+  goldBendPerStress: 0.006,
+  goldBendMaxStep: 0.35,
+  goldBendMaxTotal: 1.1,
 } as const;

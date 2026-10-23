@@ -14,7 +14,7 @@ interface Particle {
   max: number;
   size: number;
   color: string;
-  kind: 'spark' | 'chip' | 'shard' | 'drop' | 'dust' | 'star';
+  kind: 'spark' | 'chip' | 'shard' | 'drop' | 'dust' | 'star' | 'ember';
   rot: number;
 }
 
@@ -59,6 +59,9 @@ export class Scene {
   t = 0;
   you: number | null = 0;
   private dripT = [0, 0];
+  private emberT = [0, 0];
+  private burnT = [0, 0];
+  private burnSfxT = 0;
   private lastCount = -1;
   private chargeTick = [0, 0];
   koText = '';
@@ -168,6 +171,20 @@ export class Scene {
           this.flash = 0.15;
           break;
         }
+        case 'burn': {
+          this.embers(e.x, e.y, 6, 140);
+          this.popups.push({ x: e.x + (Math.random() - 0.5) * 30, y: e.y - 24, text: `${e.dmg}`, color: '#ff9a3c', life: 0.8, size: 16 + Math.min(10, e.dmg / 2), vy: -70 });
+          if (this.t - this.burnSfxT > 0.25) {
+            this.burnSfxT = this.t;
+            sfx.burn();
+          }
+          break;
+        }
+        case 'bend':
+          this.burst(e.x, e.y, 6, '#fff2a8', 'spark', 180);
+          this.popups.push({ x: e.x, y: e.y - 30, text: '曲がった!', color: '#ffd84d', life: 0.9, size: 18 + Math.min(10, e.amount * 20), vy: -40 });
+          sfx.bend();
+          break;
         case 'meltcut':
           this.drop(e.x, e.y, 5);
           sfx.drip();
@@ -218,6 +235,25 @@ export class Scene {
     if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
   }
 
+  private embers(x: number, y: number, n: number, speed: number) {
+    for (let i = 0; i < n; i++) {
+      const max = 0.5 + Math.random() * 0.5;
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 10,
+        y: y + (Math.random() - 0.5) * 10,
+        vx: (Math.random() - 0.5) * speed,
+        vy: -Math.random() * speed,
+        life: max,
+        max,
+        size: 2 + Math.random() * 3,
+        color: Math.random() < 0.5 ? '#ffd24d' : '#ff7a1a',
+        kind: 'ember',
+        rot: 0,
+      });
+    }
+    if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
+  }
+
   private drop(x: number, y: number, n = 1) {
     for (let i = 0; i < n; i++)
       this.particles.push({ x: x + (Math.random() - 0.5) * 8, y, vx: (Math.random() - 0.5) * 40, vy: 0, life: 2, max: 2, size: 3 + Math.random() * 2, color: '#8e5a70', kind: 'drop', rot: 0 });
@@ -237,6 +273,25 @@ export class Scene {
         const n = f.nodesX.length;
         const k = 2 + Math.floor(Math.random() * Math.max(1, n - 2));
         this.drop(f.nodesX[Math.min(n - 1, k)], f.nodesY[Math.min(n - 1, k)] + 4);
+      }
+    }
+    // 炎の角の火の粉 / 燃えている牛の炎
+    for (const f of view.fighters) {
+      if (f.material === 'fire' && !f.destroyed) {
+        this.emberT[f.idx] -= dt;
+        if (this.emberT[f.idx] <= 0) {
+          this.emberT[f.idx] = 0.05 + Math.random() * 0.06;
+          const n = f.nodesX.length;
+          const k = 1 + Math.floor(Math.random() * Math.max(1, n - 1));
+          this.embers(f.nodesX[Math.min(n - 1, k)], f.nodesY[Math.min(n - 1, k)], 1, 60);
+        }
+      }
+      if (f.burn > 0 && view.state !== 'over') {
+        this.burnT[f.idx] -= dt;
+        if (this.burnT[f.idx] <= 0) {
+          this.burnT[f.idx] = 0.04;
+          this.embers(f.x + (Math.random() - 0.5) * 120, WORLD.groundY - 70 - Math.random() * 60, 1, 90);
+        }
       }
     }
     // カウントダウン音
@@ -262,7 +317,11 @@ export class Scene {
       p.life -= dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      if (p.kind !== 'spark' && p.kind !== 'star') p.vy += 1200 * dt;
+      if (p.kind === 'ember') {
+        p.vy -= 260 * dt;
+        p.vx *= 1 - 2 * dt;
+        p.size *= 1 - 0.8 * dt;
+      } else if (p.kind !== 'spark' && p.kind !== 'star') p.vy += 1200 * dt;
       else {
         p.vx *= 1 - 4 * dt;
         p.vy *= 1 - 4 * dt;
@@ -272,7 +331,7 @@ export class Scene {
         p.size += dt * 20;
       }
       p.rot += dt * 8;
-      if (p.y > WORLD.groundY && p.kind !== 'dust') {
+      if (p.y > WORLD.groundY && p.kind !== 'dust' && p.kind !== 'ember') {
         p.y = WORLD.groundY;
         if (p.kind === 'drop') {
           this.addPuddle(p.x, p.size);
@@ -393,6 +452,16 @@ export class Scene {
         ctx.lineWidth = 1;
         ctx.stroke();
         ctx.restore();
+      } else if (p.kind === 'ember') {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = a * 0.25;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * 2.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
       } else if (p.kind === 'dust') {
         ctx.globalAlpha = a * 0.5;
         ctx.beginPath();
@@ -481,7 +550,13 @@ export class Scene {
         const temp = (-18 + f.melt * 18).toFixed(1);
         ctx.fillText(`${temp}℃  ${f.melt > 0.75 ? 'もう限界…' : f.melt > 0.4 ? 'とけてきた' : 'カチカチ'}`, left ? mx + mw + 8 : mx - 8, y + 57);
       }
-      if (f.crackLevel > 0 && (f.material === 'glass' || f.material === 'wood')) {
+      if (f.burn > 0) {
+        ctx.font = '800 13px system-ui, sans-serif';
+        ctx.fillStyle = '#ffb04d';
+        ctx.textAlign = left ? 'right' : 'left';
+        ctx.fillText('🔥 炎上中！', left ? x + bw : x, y + 60);
+      }
+      if (f.crackLevel > 0 && (f.material === 'glass' || f.material === 'wood' || f.material === 'coral')) {
         ctx.font = '700 12px system-ui, sans-serif';
         ctx.fillStyle = '#ffd0d0';
         ctx.textAlign = left ? 'left' : 'right';
@@ -584,7 +659,7 @@ let bgCache: { canvas: HTMLCanvasElement; extra: number } | null = null;
 export function drawBackground(ctx: CanvasRenderingContext2D, t: number, extraW: number) {
   const W = WORLD.width;
   const H = WORLD.height;
-  const ex = Math.ceil(extraW);
+  const ex = Number.isFinite(extraW) ? Math.max(0, Math.ceil(extraW)) : 0;
   if (!bgCache || bgCache.extra !== ex) {
     const c = document.createElement('canvas');
     c.width = W + ex * 2;

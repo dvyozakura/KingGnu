@@ -124,6 +124,23 @@ export function drawHorn(ctx: CanvasRenderingContext2D, o: HornDrawOpts) {
       grad.addColorStop(1, shade(mat.color.fill, 0.08 + wet * 0.15));
       break;
     }
+    case 'fire': {
+      const fl = 0.06 * Math.sin(o.time * 17) + 0.04 * Math.sin(o.time * 29 + 1.3);
+      grad.addColorStop(0, 'rgba(200,30,10,0.95)');
+      grad.addColorStop(0.45 + fl, 'rgba(255,110,20,0.92)');
+      grad.addColorStop(1, 'rgba(255,230,90,0.85)');
+      break;
+    }
+    case 'iron':
+      grad.addColorStop(0, '#4b525a');
+      grad.addColorStop(0.5, '#8a929b');
+      grad.addColorStop(1, '#5d646c');
+      break;
+    case 'gold':
+      grad.addColorStop(0, '#b8860b');
+      grad.addColorStop(0.5, '#f5cf3c');
+      grad.addColorStop(1, '#d9a514');
+      break;
     default:
       grad.addColorStop(0, shade(mat.color.fill, -0.12));
       grad.addColorStop(1, shade(mat.color.fill, 0.12));
@@ -178,12 +195,85 @@ export function drawHorn(ctx: CanvasRenderingContext2D, o: HornDrawOpts) {
     // 霜（溶けると消え、濡れたつやになる）
     ctx.fillStyle = `rgba(255,255,255,${0.18 * (1 - o.melt)})`;
     for (let i = 1; i < sx.length; i += 2) ctx.fillRect(sx[i], sy[i], 1.5, 1.5);
+  } else if (mat.id === 'fire') {
+    // ゆらめく炎の舌
+    const [sx, sy] = skinB(d.speckles, nx, ny, n, o.facing, o.widthScale);
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < sx.length; i += 2) {
+      const ph = o.time * (5 + (i % 5)) + i * 1.7;
+      const r = 5 + 4 * (0.5 + 0.5 * Math.sin(ph));
+      const yUp = -6 * (0.5 + 0.5 * Math.sin(ph * 0.7));
+      const g = ctx.createRadialGradient(sx[i], sy[i] + yUp, 0, sx[i], sy[i] + yUp, r);
+      g.addColorStop(0, 'rgba(255,240,150,0.55)');
+      g.addColorStop(1, 'rgba(255,120,20,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(sx[i], sy[i] + yUp, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 芯（中心線の明るい帯）
+    const [cx, cy] = skinB(d.grain[2], nx, ny, n, o.facing, o.widthScale);
+    ctx.strokeStyle = `rgba(255,250,200,${0.45 + 0.15 * Math.sin(o.time * 23)})`;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx[0], cy[0]);
+    for (let i = 1; i < cx.length; i++) ctx.lineTo(cx[i], cy[i]);
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  } else if (mat.id === 'iron') {
+    // ヘアライン
+    ctx.strokeStyle = 'rgba(220,226,232,0.18)';
+    ctx.lineWidth = 1;
+    for (const line of d.grain) {
+      const [lx, ly] = skinB(line, nx, ny, n, o.facing, o.widthScale);
+      ctx.beginPath();
+      ctx.moveTo(lx[0], ly[0]);
+      for (let i = 1; i < lx.length; i++) ctx.lineTo(lx[i], ly[i]);
+      ctx.stroke();
+    }
+    // リベット
+    const [sx, sy] = skinB(d.speckles.slice(0, 4), nx, ny, n, o.facing, o.widthScale);
+    for (let i = 0; i < sx.length; i++) {
+      ctx.fillStyle = '#3a4047';
+      ctx.beginPath();
+      ctx.arc(sx[i], sy[i], 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(sx[i] - 0.7, sy[i] - 0.7, 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (mat.id === 'gold') {
+    // 流れる光沢
+    const u = (o.time * 0.35) % 1.6 - 0.3;
+    const gx = bx + (tx - bx) * u;
+    const gy = by + (ty - by) * u;
+    const sg = ctx.createRadialGradient(gx, gy, 0, gx, gy, 26);
+    sg.addColorStop(0, 'rgba(255,255,230,0.6)');
+    sg.addColorStop(1, 'rgba(255,255,230,0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(gx - 26, gy - 26, 52, 52);
+    // 曲がった跡（へこみ）
+    if (o.stress > 0.02) {
+      ctx.fillStyle = `rgba(120,80,0,${Math.min(0.3, o.stress * 0.3)})`;
+      ctx.fill(path);
+    }
+  } else if (mat.id === 'coral') {
+    // 小さな穴（ポリプ）
+    const [sx, sy] = skinB(d.speckles, nx, ny, n, o.facing, o.widthScale);
+    for (let i = 0; i < sx.length; i++) {
+      ctx.fillStyle = i % 2 ? 'rgba(150,40,40,0.45)' : 'rgba(255,230,220,0.55)';
+      ctx.beginPath();
+      ctx.arc(sx[i], sy[i], i % 2 ? 1.6 : 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   // つや
-  if (mat.id === 'rubber' || mat.id === 'plastic' || mat.id === 'glass' || mat.id === 'azuki') {
+  if (mat.id === 'iron' || mat.id === 'gold' || mat.id === 'rubber' || mat.id === 'plastic' || mat.id === 'glass' || mat.id === 'azuki') {
     const [hx, hy] = skinB(d.highlight, nx, ny, n, o.facing, o.widthScale);
-    ctx.strokeStyle = mat.id === 'glass' ? 'rgba(255,255,255,0.85)' : mat.id === 'azuki' ? `rgba(255,230,240,${0.15 + o.melt * 0.4})` : 'rgba(255,255,255,0.45)';
-    ctx.lineWidth = mat.id === 'glass' ? 2.5 : 3;
+    ctx.strokeStyle = mat.id === 'glass' || mat.id === 'gold' ? 'rgba(255,255,255,0.85)' : mat.id === 'iron' ? 'rgba(235,240,245,0.7)' : mat.id === 'azuki' ? `rgba(255,230,240,${0.15 + o.melt * 0.4})` : 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = mat.id === 'glass' || mat.id === 'iron' ? 2.5 : 3;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(hx[1], hy[1]);
@@ -231,9 +321,19 @@ export function drawHorn(ctx: CanvasRenderingContext2D, o: HornDrawOpts) {
   ctx.restore();
 
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = mat.color.stroke;
-  ctx.lineWidth = mat.id === 'glass' ? 1.6 : 2.4;
-  ctx.stroke(path);
+  if (mat.id === 'fire') {
+    // 外炎（輪郭のゆらぎと光）
+    ctx.shadowColor = 'rgba(255,140,30,0.9)';
+    ctx.shadowBlur = 14 + 6 * Math.sin(o.time * 11);
+    ctx.strokeStyle = `rgba(255,${150 + Math.round(60 * Math.sin(o.time * 19))},40,0.9)`;
+    ctx.lineWidth = 3;
+    ctx.stroke(path);
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.strokeStyle = mat.color.stroke;
+    ctx.lineWidth = mat.id === 'glass' ? 1.6 : 2.4;
+    ctx.stroke(path);
+  }
   ctx.restore();
 }
 

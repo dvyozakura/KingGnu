@@ -29,6 +29,8 @@ export interface FighterView {
   nodesX: ArrayLike<number>;
   nodesY: ArrayLike<number>;
   cracks: CrackMark[];
+  /** 炎で燃えている残り時間 */
+  burn: number;
 }
 
 export interface MatchView {
@@ -72,6 +74,7 @@ export function viewFromMatch(m: Match): MatchView {
       nodesX: f.horn.x,
       nodesY: f.horn.y,
       cracks: f.horn.cracks,
+      burn: f.burn,
     })) as unknown as [FighterView, FighterView],
   };
 }

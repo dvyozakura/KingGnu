@@ -43,6 +43,7 @@ export function fakeFighter(x: number, theta: number, extra: Partial<FighterView
     nodesX: [],
     nodesY: [],
     cracks: [],
+    burn: 0,
     ...extra,
   };
 }

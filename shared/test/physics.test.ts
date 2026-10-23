@@ -24,6 +24,8 @@ import {
   templateStrokes,
   validateHornData,
   planSwing,
+  INTERACT,
+  matchupMultiplier,
   Pt,
 } from '../src/index';
 
@@ -241,7 +243,7 @@ test('高速でもすり抜けない（細い角を高速で振っても接触�
 test('CPU と1試合を最後まで（全材質・全難易度でクラッシュせず決着）', () => {
   for (const diff of ['easy', 'normal', 'hard'] as const) {
     for (const mat of MATERIAL_IDS) {
-      const m = new Match({ polygon: poly('classic'), material: mat }, { polygon: poly(HORN_TEMPLATES[MATERIAL_IDS.indexOf(mat)].id), material: 'rubber' });
+      const m = new Match({ polygon: poly('classic'), material: mat }, { polygon: poly(HORN_TEMPLATES[MATERIAL_IDS.indexOf(mat) % HORN_TEMPLATES.length].id), material: MATERIAL_IDS[(MATERIAL_IDS.indexOf(mat) + 3) % MATERIAL_IDS.length] });
       const a = new CpuBrain(diff, 3);
       const b = new CpuBrain(diff, 4);
       let guard = 0;
@@ -276,4 +278,99 @@ test('角JSON：検証と改ざん拒否', () => {
   assert.equal(validateHornData({ version: 1, name: 'x', material: 'rubber', hardness: 99, vertices: [[0, 0], [20, -40], [40, -100]] }).ok, false);
   assert.equal(validateHornData({ version: 1, name: 'x', material: 'rubber', vertices: [[0, 0], [NaN, -40], [40, -100]] }).ok, false);
   assert.equal(validateHornData({ version: 1, name: 'x', material: 'rubber', vertices: Array.from({ length: 500 }, (_, i) => [i % 50, -i % 70]) }).ok, false);
+});
+
+/* ---------------- 材質の特殊効果 ---------------- */
+
+/** 内部の接触フラグを立てて、接触効果だけを 1 秒ぶん進める */
+function touchFor(m: Match, att: 0 | 1, seconds: number, where: 'body' | 'hh' = 'body') {
+  const mm = m as unknown as { touch: { body: (Pt | null)[]; hh: Pt | null }; contactEffects(dt: number): void };
+  const steps = Math.round(seconds / SIM_DT);
+  for (let i = 0; i < steps; i++) {
+    mm.touch.body = [null, null];
+    mm.touch.hh = null;
+    if (where === 'body') mm.touch.body[att] = [600, 500];
+    else mm.touch.hh = [600, 450];
+    mm.contactEffects(SIM_DT);
+  }
+}
+
+test('炎：触れている相手に接触ダメージ＋延焼。ガラスには効かない', () => {
+  for (const target of MATERIAL_IDS) {
+    const m = new Match({ polygon: poly('classic'), material: 'fire' }, { polygon: poly('classic'), material: target }, { countdown: 0 });
+    const hp0 = m.fighters[1].hp;
+    touchFor(m, 0, 1);
+    const afterTouch = m.fighters[1].hp;
+    // 離れたあとも燃え続ける
+    const mm = m as unknown as { touch: { body: (Pt | null)[]; hh: Pt | null }; contactEffects(dt: number): void };
+    mm.touch.body = [null, null];
+    for (let i = 0; i < 60; i++) mm.contactEffects(SIM_DT);
+    const afterBurn = m.fighters[1].hp;
+    if (target === 'glass') {
+      assert.equal(afterBurn, hp0, 'ガラスは燃えない');
+    } else {
+      assert.ok(hp0 - afterTouch >= INTERACT.burnContactDps * 0.9, `${target} は接触で燃える`);
+      assert.ok(afterTouch - afterBurn > 0, `${target} は離れても燃え続ける`);
+    }
+  }
+  // 角どうしの接触でも燃える（弱め）
+  const m = new Match({ polygon: poly('classic'), material: 'fire' }, { polygon: poly('classic'), material: 'wood' }, { countdown: 0 });
+  const hp0 = m.fighters[1].hp;
+  touchFor(m, 0, 1, 'hh');
+  assert.ok(hp0 - m.fighters[1].hp >= INTERACT.burnHornDps * 0.9);
+  assert.equal(m.fighters[0].hp, m.fighters[0].maxHp, '炎自身は燃えない');
+});
+
+test('コルク・炎があずきのアイスに触れると溶けが速くなる', () => {
+  const meltAfter = (att: 'cork' | 'fire' | 'plastic') => {
+    const m = new Match({ polygon: poly('classic'), material: att }, { polygon: poly('classic'), material: 'azuki' }, { countdown: 0 });
+    for (let i = 0; i < 4 / SIM_DT; i++) {
+      touchFor(m, 0, SIM_DT);
+      (m as unknown as { updateMelt(f: unknown, dt: number): void }).updateMelt(m.fighters[1], SIM_DT);
+    }
+    return m.fighters[1].horn.melt;
+  };
+  const plain = meltAfter('plastic');
+  assert.ok(meltAfter('cork') > plain * 1.8, 'コルクで溶けが速い');
+  assert.ok(meltAfter('fire') > plain * 1.8, '炎で溶けが速い');
+});
+
+test('珊瑚はゴムに大ダメージ', () => {
+  assert.equal(matchupMultiplier(MATERIALS.coral, MATERIALS.rubber), INTERACT.coralVsRubber);
+  assert.equal(matchupMultiplier(MATERIALS.coral, MATERIALS.wood), 1);
+  const base = { attacker: MATERIALS.coral, closingSpeed: 700, relSpeed: 700, flexSpeed: 0, localMass: 4, hornMass: 20, headHit: false, targetGuarding: false, targetCharging: false, attackerCracked: false, targetHardness: 0.3 };
+  const a = computeBodyHit(base).damage;
+  const b = computeBodyHit({ ...base, matchup: matchupMultiplier(MATERIALS.coral, MATERIALS.rubber) }).damage;
+  assert.ok(b > a * 1.6);
+});
+
+test('金：硬い角とぶつかると曲がり、曲がったまま戻らない。柔らかい相手では曲がらない', () => {
+  const run = (other: 'iron' | 'cork') => {
+    const m = new Match({ polygon: poly('classic'), material: 'gold' }, { polygon: poly('classic'), material: other }, { countdown: 0 });
+    const g = m.fighters[0];
+    const before = [...g.horn.model.restAngle];
+    const b = g.horn.model.bindings[Math.floor(g.horn.model.bindings.length * 0.4)];
+    (m as unknown as { goldBend(f: unknown, h: number, s: number, b: unknown, fx: number, fy: number): void }).goldBend(g, m.fighters[1].horn.mat.hardness, 40, b, 0, 1);
+    const diff = g.horn.model.restAngle.reduce((s, v, i) => s + Math.abs(v - before[i]), 0);
+    // 物理を進めても静止角は元に戻らない
+    for (let i = 0; i < 240; i++) m.step();
+    const diff2 = g.horn.model.restAngle.reduce((s, v, i) => s + Math.abs(v - before[i]), 0);
+    return [diff, diff2];
+  };
+  const [d1, d2] = run('iron');
+  assert.ok(d1 > 0.1, '鉄に叩かれて曲がる');
+  assert.ok(Math.abs(d2 - d1) < 1e-9, '曲がったまま');
+  assert.equal(run('cork')[0], 0, 'コルクでは曲がらない');
+});
+
+test('鉄：溶けない・壊れない、反動が最大', () => {
+  const m = new Match({ polygon: poly('classic'), material: 'iron' }, { polygon: poly('classic'), material: 'glass' }, { countdown: 0 });
+  const f = m.fighters[0];
+  (m as unknown as { hornStress(f: unknown, s: number, b: unknown): void }).hornStress(f, 9999, f.horn.model.bindings[0]);
+  assert.equal(f.horn.destroyed, false);
+  assert.equal(f.horn.crackLevel, 0);
+  for (let i = 0; i < 600; i++) m.step();
+  assert.equal(f.horn.melt, 0);
+  const maxRecoil = Math.max(...MATERIAL_IDS.map((k) => MATERIALS[k].recoilMultiplier));
+  assert.equal(MATERIALS.iron.recoilMultiplier, maxRecoil);
 });

@@ -93,6 +93,13 @@ export const sfx = {
     if (mat === 'wood') tone(420, 0.08, 'square', 0.06, 0.7);
     if (mat === 'rubber') tone(180, 0.2, 'sine', 0.12, 2.2);
     if (mat === 'azuki') tone(900, 0.06, 'square', 0.05, 0.5);
+    if (mat === 'iron') {
+      tone(1250, 0.35, 'triangle', 0.1, 0.98);
+      tone(1870, 0.25, 'sine', 0.06, 0.99);
+    }
+    if (mat === 'gold') tone(980, 0.3, 'sine', 0.09, 0.97);
+    if (mat === 'coral') noise(0.07, 0.25, 2200, 2, 'bandpass');
+    if (mat === 'fire') noise(0.25, 0.25, 700, 0.5, 'lowpass');
   },
   recoil() {
     tone(90, 0.12, 'sawtooth', 0.1, 0.6);
@@ -112,6 +119,14 @@ export const sfx = {
   snap() {
     noise(0.15, 0.5, 900, 1.5);
     tone(140, 0.2, 'square', 0.1, 0.5);
+  },
+  burn() {
+    noise(0.22, 0.12, 500 + Math.random() * 300, 0.6, 'lowpass');
+    noise(0.05, 0.08, 3500, 2, 'highpass', 0.05);
+  },
+  bend() {
+    tone(220, 0.35, 'sawtooth', 0.06, 0.7);
+    tone(330, 0.3, 'triangle', 0.05, 0.75);
   },
   drip() {
     tone(1200 + Math.random() * 400, 0.06, 'sine', 0.05, 0.6);

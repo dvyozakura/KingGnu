@@ -68,7 +68,8 @@ export function planSwing(src: Fighter, opp?: Fighter): SwingPlan {
   // 相手の角の凸ピース（相手の体中心 x=0 基準）
   const oppHulls: number[][] = [];
   const oppBox = [Infinity, Infinity, -Infinity, -Infinity];
-  if (opp) {
+  // 炎の角は角どうしですり抜けるので、防がれる障害物として扱わない
+  if (opp && opp.horn.mat.special !== 'burn' && src.horn.mat.special !== 'burn') {
     dummy.x = 0;
     dummy.updateShapes();
     const ofr = dummy.frame();

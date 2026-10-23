@@ -196,6 +196,7 @@ export class OnlineSource implements BattleSource {
       nodesX: nx,
       nodesY: ny,
       cracks: hs.cracks,
+      burn: b[17] ?? 0,
     };
   }
 

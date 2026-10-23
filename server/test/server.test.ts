@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createServer, Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
-import { HORN_TEMPLATES, MAX_PACKET_BYTES, PROTOCOL_VERSION, ServerMsg, makeHornData, processOutline, templateStrokes } from '@kinggnu/shared';
+import { HORN_TEMPLATES, MAX_PACKET_BYTES, MaterialId, PROTOCOL_VERSION, ServerMsg, makeHornData, processOutline, templateStrokes } from '@kinggnu/shared';
 import { Client, GameServer } from '../src/core/gameServer';
 
 let http: Server;
@@ -90,7 +90,7 @@ class TestClient {
       });
     });
   }
-  async hello(tpl = 'classic', material: 'rubber' | 'glass' | 'azuki' | 'plastic' = 'plastic', extra: Record<string, unknown> = {}) {
+  async hello(tpl = 'classic', material: MaterialId = 'plastic', extra: Record<string, unknown> = {}) {
     const poly = processOutline(templateStrokes(tpl)).polygon;
     this.send({ t: 'hello', v: PROTOCOL_VERSION, name: this.name, horn: { ...makeHornData(this.name, material, poly), ...extra } });
   }
@@ -134,7 +134,7 @@ test('ルーム作成 → 参加 → 準備完了 → サーバー権威の試�
   const b = new TestClient('Bob');
   await Promise.all([a.open(), b.open()]);
   await a.hello('stub', 'azuki');
-  await b.hello('classic', 'rubber');
+  await b.hello('classic', 'wood');
   const wa = await a.wait('welcome');
   await b.wait('welcome');
   assert.ok(wa.horn.maxHp > 1000, 'サーバーが材質と形状からHPを算出');
@@ -249,6 +249,19 @@ test('全テンプレートの角がサーバーで受理される', async () =>
     await c.hello(t.id, 'plastic');
     const w = await c.wait('welcome');
     assert.ok(w.horn.polygon.length >= 3);
+  }
+  c.close();
+});
+
+test('オンライン使用禁止の材質（ゴム）は拒否、他の材質は受理', async () => {
+  const c = new TestClient('B');
+  await c.open();
+  await c.hello('classic', 'rubber');
+  const e = await c.wait('err');
+  assert.equal(e.code, 'banned_material');
+  for (const m of ['fire', 'iron', 'gold', 'coral', 'glass'] as const) {
+    await c.hello('classic', m);
+    await c.wait('welcome');
   }
   c.close();
 });

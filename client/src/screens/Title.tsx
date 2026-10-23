@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { HornPreview } from '../components/HornPreview';
 import { isMuted, setMuted, sfx, unlockAudio } from '../game/audio';
 import { processOutline, templateStrokes } from '@kinggnu/shared';
+import { Guide } from './Guide';
 
 interface Props {
   onCpu: () => void;
@@ -13,6 +14,7 @@ const demo = processOutline(templateStrokes('whip')).polygon;
 
 export function Title({ onCpu, onOnline }: Props) {
   const [help, setHelp] = useState(false);
+  const [guide, setGuide] = useState(false);
   const [mute, setMute] = useState(isMuted());
   const go = (fn: () => void) => () => {
     unlockAudio();
@@ -37,9 +39,14 @@ export function Title({ onCpu, onOnline }: Props) {
           <button className="big alt" onClick={go(onOnline)}>
             ONLINE BATTLE
           </button>
-          <button className="ghost" onClick={() => setHelp(true)}>
-            操作説明
-          </button>
+          <div className="btn-row stretch">
+            <button className="ghost" onClick={() => setHelp(true)}>
+              操作説明
+            </button>
+            <button className="ghost" onClick={go(() => setGuide(true))}>
+              📖 材質図説
+            </button>
+          </div>
           <button
             className="ghost small"
             onClick={() => {
@@ -83,8 +90,9 @@ export function Title({ onCpu, onOnline }: Props) {
             <h4>コツ</h4>
             <ul>
               <li>柔らかい角（ゴム・コルク）は振った直後に先端が遅れてしなる。先端が戻ってくる瞬間に当てると「WHIP!」で大ダメージ。</li>
-              <li>硬い角（ガラス・あずきのアイス）は一撃が重いが、自分にも反作用ダメージ。ガラスはヒビが入ると脆くなる。</li>
-              <li>あずきのアイスは時間とともに溶けて細く短くなる。短期決戦で！</li>
+              <li>硬い角（ガラス・あずきのアイス・鉄）は一撃が重いが、自分にも反作用ダメージ。ガラスはヒビが入ると脆くなる。</li>
+              <li>あずきのアイスは時間とともに溶けて細く短くなる。炎やコルクに触れると溶けが速い。短期決戦で！</li>
+              <li>炎は触れるだけで燃やす。金は硬い角とぶつかると曲がる。珊瑚はゴムに強い。くわしくは「材質図説」へ。</li>
               <li>長い角は届くが重くて振りが遅い。短い角は速い。</li>
             </ul>
             <button className="primary" onClick={() => setHelp(false)}>
@@ -93,6 +101,7 @@ export function Title({ onCpu, onOnline }: Props) {
           </div>
         </div>
       )}
+      {guide && <Guide onClose={() => setGuide(false)} />}
     </div>
   );
 }

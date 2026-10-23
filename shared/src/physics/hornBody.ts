@@ -74,6 +74,8 @@ export class HornBody {
   melt = 0;
   destroyed = false;
   totalMass = 0;
+  /** 金：関節ごとの累積の曲がり（rad） */
+  bendTotal = new Float64Array(0);
   private meltCutLength: number;
 
   constructor(model: HornModel, material: MaterialId, frame: HeadFrame) {
@@ -108,6 +110,7 @@ export class HornBody {
     this.tgtPY = new Float64Array(n);
     this.vertX = new Float64Array(model.polygon.length);
     this.vertY = new Float64Array(model.polygon.length);
+    this.bendTotal = new Float64Array(n);
     this.updateMasses();
     this.computeTargets(frame);
     for (let i = 0; i < n; i++) {
@@ -460,6 +463,32 @@ export class HornBody {
       this.py[i] -= tipV[1] * dt * w * 0.5;
     }
     return { debris: worldDebris, destroyed: false };
+  }
+
+  /**
+   * 永久変形（金）：関節 i（節点 i-1 まわり）の静止形状を dAng だけ曲げる。
+   * 静止角と静止節点（形状保持の目標）の両方を書き換えるので、曲がったまま戻らない。
+   * 戻り値：実際に曲げた量
+   */
+  bendJoint(i: number, dAng: number, maxTotal: number): number {
+    if (i < 2 || i >= this.n || this.destroyed) return 0;
+    const cur = this.bendTotal[i];
+    const next = Math.max(-maxTotal, Math.min(maxTotal, cur + dAng));
+    const d = next - cur;
+    if (Math.abs(d) < 1e-4) return 0;
+    this.bendTotal[i] = next;
+    this.model.restAngle[i] += d;
+    const nodes = this.model.nodes;
+    const [ox, oy] = nodes[i - 1];
+    const c = Math.cos(d);
+    const s = Math.sin(d);
+    for (let j = i; j < nodes.length; j++) {
+      const qx = nodes[j][0] - ox;
+      const qy = nodes[j][1] - oy;
+      nodes[j] = [ox + qx * c - qy * s, oy + qx * s + qy * c];
+    }
+    this.version++;
+    return d;
   }
 
   /** あずきのアイスの融解。戻り値: 切断が起きたら true */

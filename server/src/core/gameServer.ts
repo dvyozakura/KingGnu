@@ -15,6 +15,7 @@ import {
   Match,
   MatchEvent,
   MaterialId,
+  isOnlineAllowed,
   Poly,
   PublicPlayer,
   SNAPSHOT_HZ,
@@ -284,6 +285,7 @@ export class GameServer {
   }
 
   private hello(c: Client, name: string, horn: HornData) {
+    if (!isOnlineAllowed(horn.material)) return this.err(c, 'banned_material', `material ${horn.material} is not allowed online`);
     // 角はサーバーで改めてクリーンアップし、HP を材質と形状から計算する（クライアント申告値は使わない）
     const out = processOutline([horn.vertices]);
     if (!out.ok) return this.err(c, 'invalid_horn', out.error ?? 'invalid');

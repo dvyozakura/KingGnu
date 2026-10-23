@@ -45,7 +45,10 @@ const ERRORS: Record<string, string> = {
   not_in_room: 'ルームに入っていません',
   server_full: 'サーバーが混雑しています',
   invalid_horn: '角データが不正です',
+  banned_material: 'この材質は現在オンライン対戦で使用禁止です。材質を選び直してください',
   version: 'クライアントのバージョンが古いです。再読み込みしてください',
+  no_hello: 'もう一度ボタンを押してください',
+  already_in_room: 'すでにルームに入っています',
 };
 
 export function Online({ horn, onBack, onEditHorn }: Props) {
@@ -80,6 +83,14 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
   const handle = (m: ServerMsg) => {
     switch (m.t) {
       case 'err':
+        if (m.code === 'resume_failed') {
+          // サーバー再起動などで部屋が消えた
+          setError('サーバーが再起動したため、ロビーに戻りました');
+          setRoom(null);
+          setPhase('menu');
+          break;
+        }
+        if (m.code === 'no_hello') break; // 自動で名乗り直すので表示しない
         setError(ERRORS[m.code] ?? m.msg ?? m.code);
         if (phaseRef.current === 'connecting' || phaseRef.current === 'queue') setPhase('menu');
         break;
@@ -124,20 +135,23 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
 
   const ensureClient = async (): Promise<NetClient> => {
     const existing = clientRef.current;
-    if (existing && existing.status === 'open') return existing;
-    const cl = new NetClient(url || DEFAULT_SERVER_URL);
-    clientRef.current = cl;
-    cl.on(handle);
-    cl.onStatus((s) => {
-      if (s === 'reconnecting') setBanner('通信が切れました。再接続中…');
-      else if (s === 'open') setBanner((b) => (b.startsWith('通信') ? '' : b));
-      else if (s === 'closed' && phaseRef.current !== 'menu') {
-        setBanner('');
-        setError('サーバーとの接続が切れました');
-        setPhase('menu');
-      }
-    });
-    await cl.connect();
+    const reuse = existing && existing.status === 'open';
+    const cl = reuse ? existing : new NetClient(url || DEFAULT_SERVER_URL);
+    if (!reuse) {
+      clientRef.current = cl;
+      cl.on(handle);
+      cl.onStatus((s) => {
+        if (s === 'reconnecting') setBanner('通信が切れました。再接続中…');
+        else if (s === 'open') setBanner((b) => (b.startsWith('通信') ? '' : b));
+        else if (s === 'closed' && phaseRef.current !== 'menu') {
+          setBanner('');
+          setError('サーバーとの接続が切れました');
+          setPhase('menu');
+        }
+      });
+      await cl.connect();
+    }
+    // 毎回名乗り直す（サーバー再起動などで名乗りが失われていても確実に通るように）
     const welcome = new Promise<void>((resolve, reject) => {
       const off = cl.on((m) => {
         if (m.t === 'welcome') {
@@ -151,7 +165,12 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
       });
       setTimeout(() => reject(new Error('サーバーから応答がありません')), 6000);
     });
-    cl.send({ t: 'hello', v: PROTOCOL_VERSION, name: name.trim() || 'Guest', horn: makeHornData(horn.name, horn.material, horn.polygon) });
+    cl.sendHello({
+      t: 'hello',
+      v: PROTOCOL_VERSION,
+      name: name.trim() || 'Guest',
+      horn: makeHornData(horn.name, horn.material, horn.polygon),
+    });
     await welcome;
     cl.resumable = true;
     return cl;
@@ -211,9 +230,22 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
     return (
       <Result
         result={result}
-        note={oppGone ? '相手が退出しました' : votes[1 - you] ? '相手が再戦を希望しています！' : votes[you] ? '相手の返事を待っています…' : undefined}
+        note={
+          oppGone
+            ? '相手が退出しました'
+            : votes[1 - you]
+              ? '相手が再戦を希望しています！'
+              : votes[you]
+                ? '相手の返事を待っています…'
+                : undefined
+        }
         actions={[
-          { label: votes[you] ? '再戦を申請中…' : '再戦を申請する', primary: true, disabled: votes[you] || oppGone, onClick: () => clientRef.current?.send({ t: 'rematch' }) },
+          {
+            label: votes[you] ? '再戦を申請中…' : '再戦を申請する',
+            primary: true,
+            disabled: votes[you] || oppGone,
+            onClick: () => clientRef.current?.send({ t: 'rematch' }),
+          },
           { label: 'ロビーに戻る', onClick: leaveRoom },
           { label: 'タイトルへ', onClick: onBack },
         ]}

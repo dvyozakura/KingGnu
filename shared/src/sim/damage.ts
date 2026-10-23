@@ -31,6 +31,8 @@ export interface BodyHitInput {
   attackerCracked: boolean;
   /** 被弾側の硬さ（牛の体=0.3） */
   targetHardness: number;
+  /** 材質の相性によるダメージ倍率（珊瑚→ゴム など。既定 1） */
+  matchup?: number;
 }
 
 export interface BodyHitResult {
@@ -50,8 +52,10 @@ export function effectiveMass(mat: MaterialDef, localMass: number, hornMass: num
 /** テスト・バランス調整用のフック */
 export const damageHooks: { onBodyHit?: (input: BodyHitInput, result: BodyHitResult) => void } = {};
 
+const capSpeed = (v: number) => (Number.isFinite(v) ? Math.min(DAMAGE.maxSpeed, Math.max(0, v)) : 0);
+
 export function computeBodyHit(h: BodyHitInput): BodyHitResult {
-  const r = computeBodyHitInner(h);
+  const r = computeBodyHitInner({ ...h, closingSpeed: capSpeed(h.closingSpeed), relSpeed: capSpeed(h.relSpeed), flexSpeed: capSpeed(h.flexSpeed) });
   damageHooks.onBodyHit?.(h, r);
   return r;
 }
@@ -79,7 +83,12 @@ function computeBodyHitInner(h: BodyHitInput): BodyHitResult {
   const k = raw > 0 ? damage / raw : 0;
   direct *= k;
   whip *= k;
-  damage = Math.min(DAMAGE.maxSingleDamage, damage);
+  // 相性倍率は飽和カーブの後に掛ける（倍率がそのまま効く）
+  const mu = h.matchup ?? 1;
+  damage *= mu;
+  direct *= mu;
+  whip *= mu;
+  damage = Math.min(DAMAGE.maxSingleDamage * Math.max(1, mu), damage);
   // しきい値付近はなだらかに
   const ramp = Math.min(1, (h.closingSpeed - DAMAGE.minClosingSpeed) / 120);
   damage *= ramp;
@@ -120,6 +129,7 @@ export interface ClashResult {
 
 /** 角同士の衝突 */
 export function computeClash(c: ClashInput): ClashResult {
+  c = { ...c, closingSpeed: capSpeed(c.closingSpeed) };
   if (c.closingSpeed < DAMAGE.minClosingSpeed * 0.7) return { impulse: 0, stressA: 0, stressB: 0, recoilA: 0, recoilB: 0 };
   const mA = effectiveMass(c.matA, c.massA, c.hornMassA);
   const mB = effectiveMass(c.matB, c.massB, c.hornMassB);

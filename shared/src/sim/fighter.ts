@@ -55,6 +55,8 @@ export class Fighter {
   stats: FighterStats = { dealt: 0, taken: 0, recoilTaken: 0, maxImpactSpeed: 0, maxHit: 0, hits: 0, whipHits: 0 };
   cooldown = 0;
   heat = 0;
+  /** 炎による延焼の残り時間（秒） */
+  burn = 0;
   name = '';
 
   constructor(idx: 0 | 1, model: HornModel, material: MaterialId, x: number) {
@@ -80,6 +82,11 @@ export class Fighter {
     return { px: this.pivotX, py: this.pivotY, theta: this.theta, omega: this.omega, vx: this.vx, vy: 0, facing: this.facing };
   }
 
+  /** 材質ごとの移動・攻撃速度の倍率 */
+  get spd() {
+    return this.horn.mat.speed;
+  }
+
   inertia() {
     return COW.headInertia + this.horn.inertiaAboutPivot();
   }
@@ -96,12 +103,12 @@ export class Fighter {
         if (inp.charge && active) this.setPhase('charge');
         break;
       case 'charge':
-        this.charge = Math.min(1, this.charge + dt / CONTROL.chargeTime);
+        this.charge = Math.min(1, this.charge + (dt * Math.sqrt(this.spd)) / CONTROL.chargeTime);
         if (!inp.charge) this.release();
         break;
       case 'swing':
         if (this.phaseT >= this.swingDur) {
-          this.recoverDur = CONTROL.recoverBase + CONTROL.recoverCharge * this.swingCharge;
+          this.recoverDur = (CONTROL.recoverBase + CONTROL.recoverCharge * this.swingCharge) / this.spd;
           this.setPhase('recover');
         }
         break;
@@ -113,9 +120,9 @@ export class Fighter {
     // 歩行
     const canWalk = this.phase !== 'swing';
     const want = canWalk ? inp.move * this.facing : 0;
-    const maxV = COW.walkMax * (this.phase === 'charge' ? 0.45 : this.guard ? 0.8 : 1);
+    const maxV = COW.walkMax * this.spd * (this.phase === 'charge' ? 0.45 : this.guard ? 0.8 : 1);
     if (want !== 0 && Math.abs(this.vx) <= maxV + 1) {
-      this.vx += want * COW.walkAccel * dt;
+      this.vx += want * COW.walkAccel * this.spd * dt;
       this.vx = Math.max(-maxV, Math.min(maxV, this.vx));
     } else {
       const fr = COW.friction * (this.phase === 'swing' ? 0.55 : 1) * dt;
@@ -132,8 +139,8 @@ export class Fighter {
 
   private release() {
     this.swingCharge = this.charge;
-    this.swingDur = CONTROL.swingTimeBase + CONTROL.swingTimeCharge * this.charge;
-    const lunge = COW.lungeBase + COW.lungeCharge * this.charge;
+    this.swingDur = (CONTROL.swingTimeBase + CONTROL.swingTimeCharge * this.charge) / this.spd;
+    const lunge = (COW.lungeBase + COW.lungeCharge * this.charge) * (0.7 + 0.3 * this.spd);
     this.vx = this.facing * Math.max(this.vx * this.facing, lunge);
     this.charge = 0;
     this.setPhase('swing');
@@ -159,14 +166,16 @@ export class Fighter {
       kd = CONTROL.swingKd;
       amax = CONTROL.swingAccelBase + CONTROL.swingAccelCharge * this.swingCharge;
     }
-    const ratio = Math.max(0.3, Math.min(2.2, REF_INERTIA / this.inertia()));
-    let alpha = (kp * (target - this.theta) - kd * this.omega) * ratio;
+    // 角の慣性（長い・重い角ほど遅い）は控えめに効かせ、材質の速さを主にする
+    const sp = this.spd;
+    const ratio = Math.max(0.6, Math.min(1.5, Math.sqrt(REF_INERTIA / this.inertia()))) * sp * sp;
+    let alpha = (kp * (target - this.theta) - kd * this.omega * sp) * ratio;
     const lim = amax * ratio;
     alpha = Math.max(-lim, Math.min(lim, alpha));
     this.omega += alpha * dt;
-    const wmax = this.phase === 'swing' ? CONTROL.maxOmegaBase + CONTROL.maxOmegaCharge * this.swingCharge : CONTROL.maxOmegaBase;
+    const wmax = (this.phase === 'swing' ? CONTROL.maxOmegaBase + CONTROL.maxOmegaCharge * this.swingCharge : CONTROL.maxOmegaBase) * sp;
     this.omega = Math.max(-wmax * 1.6, Math.min(wmax * 1.6, this.omega));
-    if (this.phase === 'swing') this.omega = Math.min(this.omega, wmax / Math.sqrt(Math.max(0.5, this.inertia() / REF_INERTIA)));
+    if (this.phase === 'swing') this.omega = Math.min(this.omega, wmax / Math.pow(Math.max(0.6, this.inertia() / REF_INERTIA), 0.25));
     this.theta += this.omega * dt;
     if (this.theta < CONTROL.thetaMin) {
       this.theta = CONTROL.thetaMin;

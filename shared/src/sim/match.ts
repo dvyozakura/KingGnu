@@ -2,8 +2,8 @@
  * 1対1の試合シミュレーション（CPU戦ではクライアント、オンライン戦ではサーバーが実行）
  * 固定タイムステップ。高速時は速度に応じてサブステップ数を増やし、すり抜けを防止する。
  */
-import { DAMAGE, HORN, MATCH, MELT, SIM_DT, MAX_STEPS_PER_UPDATE, WORLD, COW } from '../config/game';
-import { MaterialId } from '../config/materials';
+import { DAMAGE, HORN, INTERACT, MATCH, MELT, SIM_DT, MAX_STEPS_PER_UPDATE, WORLD, COW } from '../config/game';
+import { MaterialDef, MaterialId } from '../config/materials';
 import { Poly, Pt, convexHullFlat } from '../geometry/polygon';
 import { Binding, buildHornModel } from '../horn/model';
 import { aabbOverlap, sat } from '../physics/collision';
@@ -28,6 +28,10 @@ export type MatchEvent =
   | { type: 'break'; f: number; debris: Poly; vx: number; vy: number; shatter: boolean }
   | { type: 'chip'; f: number; x: number; y: number }
   | { type: 'meltcut'; f: number; x: number; y: number }
+  /** 炎による接触・延焼ダメージ（f=燃えている側, まとめて通知） */
+  | { type: 'burn'; f: number; x: number; y: number; dmg: number }
+  /** 金の角が曲がった */
+  | { type: 'bend'; f: number; x: number; y: number; amount: number }
   | { type: 'swing'; f: number; power: number }
   | { type: 'ko'; loser: number | null }
   | { type: 'end'; winner: number | null; reason: EndReason };
@@ -65,6 +69,19 @@ interface Episode {
 
 const BODY_SHARE = 0.12;
 
+/** a の角が b の体に与えるダメージの相性倍率 */
+export function matchupMultiplier(a: MaterialDef, b: MaterialDef): number {
+  if (a.id === 'coral' && b.id === 'rubber') return INTERACT.coralVsRubber;
+  return 1;
+}
+
+interface Touch {
+  /** 自分の角が相手の体・頭に触れている（接触点） */
+  body: [Pt | null, Pt | null];
+  /** 角どうしが触れている */
+  hh: Pt | null;
+}
+
 export class Match {
   fighters: [Fighter, Fighter];
   state: MatchState = 'countdown';
@@ -85,6 +102,13 @@ export class Match {
   /** 角の形状が変わるたびに増える（オンライン同期用） */
   hornRev: [number, number] = [0, 0];
   private chipCooldown = [0, 0];
+  private touch: Touch = { body: [null, null], hh: null };
+  private burnAcc = [0, 0];
+  private burnEmitT = [0, 0];
+  private burnPos: Pt[] = [
+    [0, 0],
+    [0, 0],
+  ];
   paused = false;
 
   constructor(a: HornSetup, b: HornSetup, opts: { countdown?: number; timeLimit?: number } = {}) {
@@ -171,6 +195,8 @@ export class Match {
     const sub = Math.max(2, Math.min(10, Math.ceil((maxSpeed * dt) / (HORN.minHalfWidth * 1.1))));
     const h = dt / sub;
     this.cands.clear();
+    this.touch.body[0] = this.touch.body[1] = null;
+    this.touch.hh = null;
     for (let s = 0; s < sub; s++) {
       for (const f of this.fighters) f.integrate(h);
       this.separateBodies();
@@ -182,7 +208,10 @@ export class Match {
       this.collide();
       for (const f of this.fighters) f.horn.skin();
     }
-    if (this.state === 'fight') this.resolveContacts();
+    if (this.state === 'fight') {
+      this.resolveContacts();
+      this.contactEffects(dt);
+    }
     for (const f of this.fighters) this.updateMelt(f, dt);
     this.chipCooldown[0] = Math.max(0, this.chipCooldown[0] - dt);
     this.chipCooldown[1] = Math.max(0, this.chipCooldown[1] - dt);
@@ -269,6 +298,7 @@ export class Match {
           const b = horn.model.bindings[vi];
           const vx = horn.vertX[vi];
           const vy = horn.vertY[vi];
+          this.touch.body[i] = [vx, vy];
           const vh = horn.velocityAt(b);
           let tvx = tgt.vx;
           let tvy = 0;
@@ -340,6 +370,9 @@ export class Match {
           const closing = -(rvx * m.nx + rvy * m.ny);
           const rA = A.rigidVelocity(A.vertX[va], A.vertY[va], F[0].frame());
           const rB = B.rigidVelocity(B.vertX[vb], B.vertY[vb], F[1].frame());
+          this.touch.hh = [(A.vertX[va] + B.vertX[vb]) / 2, (A.vertY[va] + B.vertY[vb]) / 2];
+          // 炎の角は実体がないので角どうしでは押し合わない（すり抜けて燃やすだけ）
+          if (A.mat.special === 'burn' || B.mat.special === 'burn') continue;
           this.candidate('hh', {
             closing,
             relSpeed: Math.hypot(rvx, rvy),
@@ -386,7 +419,7 @@ export class Match {
             A.addVelocity(ba, m.nx * closing * (1 + e) * sA * 0.8, m.ny * closing * (1 + e) * sA * 0.8);
             B.addVelocity(bb, -m.nx * closing * (1 + e) * (1 - sA) * 0.8, -m.ny * closing * (1 + e) * (1 - sA) * 0.8);
             // 頭への反作用トルク
-            const J = closing * (mA * mB) / (mA + mB) * 0.02;
+            const J = Math.min(DAMAGE.maxSpeed, closing) * (mA * mB) / (mA + mB) * 0.02;
             this.torqueFromContact(F[0], A.vertX[va], A.vertY[va], m.nx * J, m.ny * J);
             this.torqueFromContact(F[1], B.vertX[vb], B.vertY[vb], -m.nx * J, -m.ny * J);
           }
@@ -501,6 +534,7 @@ export class Match {
       targetCharging: tgt.phase === 'charge',
       attackerCracked: att.horn.crackLevel > 0,
       targetHardness: 0.3,
+      matchup: matchupMultiplier(att.horn.mat, tgt.horn.mat),
     });
     const dInc = res.damage - ep.dmg;
     if (res.damage <= 0 || (ep.dmg > 0 && dInc < 8)) return;
@@ -516,7 +550,7 @@ export class Match {
     if (first) att.stats.hits++;
     if (res.whip > res.direct && first) att.stats.whipHits++;
     att.stats.maxHit = Math.max(att.stats.maxHit, res.damage);
-    att.stats.maxImpactSpeed = Math.max(att.stats.maxImpactSpeed, Math.round(c.closing));
+    att.stats.maxImpactSpeed = Math.max(att.stats.maxImpactSpeed, Math.round(Math.min(DAMAGE.maxSpeed, c.closing)));
     tgt.stats.taken += dInc;
     // ノックバック（n は相手→角の向き。相手は -n 方向へ押される）
     const kb = ((first ? res.impulse : res.impulse * (dInc / res.damage)) * DAMAGE.knockback) / COW.bodyMass;
@@ -539,6 +573,7 @@ export class Match {
       guard: tgt.guard,
     });
     if (att.horn.mat.special === 'melt') att.heat += MELT.impactHeat * Math.min(2, res.impulse / 20000);
+    if (first && att.horn.mat.id === 'cork' && tgt.horn.mat.special === 'melt') tgt.heat += INTERACT.corkMeltImpact;
     this.hornStress(att, selfStressFromRecoil(att.horn.mat, res.impulse), c.b);
     if (res.damage >= 150 && first && this.state === 'fight') {
       this.timeScale = 0.3;
@@ -565,10 +600,13 @@ export class Match {
     F1.hp = Math.max(0, F1.hp - r.recoilB);
     F0.stats.recoilTaken += r.recoilA;
     F1.stats.recoilTaken += r.recoilB;
-    F0.stats.maxImpactSpeed = Math.max(F0.stats.maxImpactSpeed, Math.round(c.closing));
-    F1.stats.maxImpactSpeed = Math.max(F1.stats.maxImpactSpeed, Math.round(c.closing));
+    F0.stats.maxImpactSpeed = Math.max(F0.stats.maxImpactSpeed, Math.round(Math.min(DAMAGE.maxSpeed, c.closing)));
+    F1.stats.maxImpactSpeed = Math.max(F1.stats.maxImpactSpeed, Math.round(Math.min(DAMAGE.maxSpeed, c.closing)));
     if (F0.horn.mat.special === 'melt') F0.heat += MELT.impactHeat * 0.5;
     if (F1.horn.mat.special === 'melt') F1.heat += MELT.impactHeat * 0.5;
+    for (const i of [0, 1] as const) {
+      if (this.fighters[i].horn.mat.id === 'cork' && this.fighters[1 - i].horn.mat.special === 'melt') this.fighters[1 - i].heat += INTERACT.corkMeltImpact;
+    }
     // HPは牛と角が一体：角で受けても（軽減されるが）ダメージは通る。振っていた側が与える
     if (c.own && c.flex2) {
       for (const i of [0, 1] as const) {
@@ -588,6 +626,7 @@ export class Match {
           targetCharging: false,
           attackerCracked: att.horn.crackLevel > 0,
           targetHardness: tgt.horn.mat.hardness,
+          matchup: matchupMultiplier(att.horn.mat, tgt.horn.mat),
         });
         const dmg = Math.round(res.damage * DAMAGE.hornBlockMultiplier);
         if (dmg <= 0) continue;
@@ -605,6 +644,78 @@ export class Match {
     }
     this.hornStress(F0, r.stressA, c.b);
     if (c.b2) this.hornStress(F1, r.stressB, c.b2);
+    // 金：硬い角とぶつかると曲がる（F0 の角には +n 方向、F1 の角には -n 方向の力）
+    this.goldBend(F0, F1.horn.mat.hardness, r.stressA, c.b, c.nx, c.ny);
+    if (c.b2) this.goldBend(F1, F0.horn.mat.hardness, r.stressB, c.b2, -c.nx, -c.ny);
+  }
+
+  /** 金の角の永久変形。力の向き (fx,fy) で接触点より根元側の関節を曲げる */
+  private goldBend(f: Fighter, otherHardness: number, stress: number, b: Binding, fx: number, fy: number) {
+    const horn = f.horn;
+    if (horn.mat.breakMode !== 'bend' || horn.destroyed || otherHardness < INTERACT.goldBendHardness || stress < 6) return;
+    const hardF = (otherHardness - 0.4) / 0.6;
+    const mag = Math.min(INTERACT.goldBendMaxStep, stress * INTERACT.goldBendPerStress * hardF);
+    const joint = Math.max(2, Math.min(horn.n - 1, b.s));
+    const [px, py] = horn.pointAt(b);
+    const wx = horn.x[joint - 1];
+    const wy = horn.y[joint - 1];
+    const torque = (px - wx) * fy - (py - wy) * fx;
+    if (Math.abs(torque) < 1e-6) return;
+    const d = horn.bendJoint(joint, f.facing * Math.sign(torque) * mag, INTERACT.goldBendMaxTotal);
+    if (Math.abs(d) > 0.02) {
+      horn.stress = Math.min(1, horn.stress + Math.abs(d));
+      this.events.push({ type: 'bend', f: f.idx, x: px, y: py, amount: Math.round(Math.abs(d) * 100) / 100 });
+    }
+  }
+
+  /** 接触し続けている間の効果（炎の接触ダメージ・延焼、あずきの溶け促進） */
+  private contactEffects(dt: number) {
+    const t = this.touch;
+    for (const i of [0, 1] as const) {
+      const att = this.fighters[i];
+      const tgt = this.fighters[1 - i];
+      const am = att.horn.mat;
+      const bodyPt = t.body[i];
+      const pt = bodyPt ?? t.hh;
+      if (pt && !att.horn.destroyed) {
+        if (am.special === 'burn' && tgt.horn.mat.id !== 'glass') {
+          const dps = bodyPt ? INTERACT.burnContactDps : INTERACT.burnHornDps;
+          this.burnDamage(tgt, att, dps * dt, pt);
+          tgt.burn = INTERACT.burnAfterTime;
+          if (tgt.horn.mat.special === 'melt') tgt.heat += INTERACT.fireMeltRate * dt;
+        }
+        if (am.id === 'cork' && tgt.horn.mat.special === 'melt') tgt.heat += INTERACT.corkMeltRate * dt;
+      }
+    }
+    for (const i of [0, 1] as const) {
+      const f = this.fighters[i];
+      if (f.burn > 0) {
+        f.burn = Math.max(0, f.burn - dt);
+        const tip = f.horn.n > 0 ? this.headTop(f) : ([f.x, WORLD.groundY - 120] as Pt);
+        this.burnDamage(f, this.fighters[1 - i], INTERACT.burnAfterDps * dt, tip);
+      }
+      this.burnEmitT[i] += dt;
+      if (this.burnAcc[i] >= 1 && (this.burnEmitT[i] >= 0.3 || this.burnAcc[i] >= 20)) {
+        const d = Math.round(this.burnAcc[i]);
+        this.events.push({ type: 'burn', f: i, x: this.burnPos[i][0], y: this.burnPos[i][1], dmg: d });
+        this.burnAcc[i] -= d;
+        this.burnEmitT[i] = 0;
+      }
+    }
+  }
+
+  private headTop(f: Fighter): Pt {
+    return [f.pivotX + f.facing * 30, f.pivotY - 10];
+  }
+
+  private burnDamage(tgt: Fighter, src: Fighter, amount: number, at: Pt) {
+    if (amount <= 0 || tgt.hp <= 0) return;
+    const d = Math.min(tgt.hp, amount);
+    tgt.hp -= d;
+    tgt.stats.taken += d;
+    src.stats.dealt += d;
+    this.burnAcc[tgt.idx] += d;
+    this.burnPos[tgt.idx] = [at[0], at[1]];
   }
 
   /** 角の局所破損（材質ごとの壊れ方） */
@@ -618,6 +729,10 @@ export class Match {
     switch (mat.breakMode) {
       case 'deform':
         horn.stress = Math.min(1, horn.stress + stress / 60);
+        return;
+      case 'none':
+      case 'bend':
+        // 壊れない（金の曲がりは clash 側で向き付きで処理）
         return;
       case 'whiten':
         horn.stress = Math.min(1, horn.stress + stress / 120);
@@ -778,6 +893,7 @@ export class Match {
           Math.round(f.vx),
           Math.round(f.hitFlash * 100) / 100,
           nodes,
+          Math.round(f.burn * 10) / 10,
         ] as FighterSnap;
       }) as [FighterSnap, FighterSnap],
     };
@@ -816,6 +932,7 @@ export type FighterSnap = [
   vx: number,
   flash: number,
   nodes: number[],
+  burn: number,
 ];
 
 export interface MatchSnapshot {

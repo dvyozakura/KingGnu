@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MaterialId, processOutline, templateStrokes } from '@kinggnu/shared';
+import { MaterialId, ONLINE_BANNED, processOutline, templateStrokes } from '@kinggnu/shared';
 import { BattleResult, LocalSource } from './game/source';
 import { Battle } from './screens/Battle';
 import { CpuChoice, CpuSetup, resolveCpu } from './screens/CpuSetup';
@@ -74,6 +74,8 @@ export function App() {
           polygon={draft.polygon}
           initial={draft.material}
           nextLabel={mode === 'cpu' ? '決定 → CPU設定' : '決定 → オンラインへ'}
+          disabled={mode === 'online' ? ONLINE_BANNED : []}
+          disabledLabel="オンライン禁止"
           onBack={() => setScreen('editor')}
           onDone={(m: MaterialId) => {
             setDraft({ ...draft, material: m });
