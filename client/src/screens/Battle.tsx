@@ -103,6 +103,11 @@ export function Battle({ source, onEnd, onQuit, banner }: Props) {
       input.current = { charge: false, keyCharge: false, ptrCharge: false, left: false, right: false };
       pushInput();
     };
+    // iOS の長押しメニュー・文字選択を抑止（ボタン以外）。React の touch は passive なので直接登録する
+    const noCallout = (e: TouchEvent) => {
+      if (!(e.target as HTMLElement).closest('button')) e.preventDefault();
+    };
+    wrap.addEventListener('touchstart', noCallout, { passive: false });
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
     window.addEventListener('blur', blur);
@@ -110,6 +115,7 @@ export function Battle({ source, onEnd, onQuit, banner }: Props) {
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(endTimer);
+      wrap.removeEventListener('touchstart', noCallout);
       window.removeEventListener('keydown', kd);
       window.removeEventListener('keyup', ku);
       window.removeEventListener('blur', blur);
@@ -127,7 +133,11 @@ export function Battle({ source, onEnd, onQuit, banner }: Props) {
   };
 
   return (
-    <div className="screen battle" ref={wrapRef}>
+    <div
+      className="screen battle"
+      ref={wrapRef}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <canvas
         ref={canvasRef}
         className="battle-canvas"

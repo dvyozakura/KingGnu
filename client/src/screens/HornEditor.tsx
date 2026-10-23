@@ -45,7 +45,24 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
   const [strokes, setStrokes] = useState<Poly[]>(initial.strokes.length ? initial.strokes : initial.polygon.length ? [initial.polygon] : []);
   const [name, setName] = useState(initial.name);
   const [showHit, setShowHit] = useState(false);
-  const [message, setMessage] = useState<string>('');
+  const [message, setMessageRaw] = useState<string>('');
+  const [msgId, setMsgId] = useState(0);
+  const [msgVisible, setMsgVisible] = useState(false);
+  const setMessage = (m: string) => {
+    setMessageRaw(m);
+    if (m) setMsgId((i) => i + 1);
+  };
+  // 修正・エラーのお知らせは数秒でフェードアウト
+  useEffect(() => {
+    if (!msgId) return;
+    setMsgVisible(true);
+    const t1 = setTimeout(() => setMsgVisible(false), 2600);
+    const t2 = setTimeout(() => setMessageRaw(''), 3300);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [msgId]);
   const [saved, setSaved] = useState<SavedHorn[]>(() => hornStore.list());
   const [importText, setImportText] = useState('');
   const [showIO, setShowIO] = useState(false);
@@ -310,7 +327,7 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
             onPointerCancel={onUp}
             style={{ touchAction: 'none' }}
           />
-          {message && <div className={`toast ${outline?.ok ? 'info' : 'warn'}`}>{message}</div>}
+          {message && <div className={`toast fade ${msgVisible ? '' : 'out'} ${outline?.ok ? 'info' : 'warn'}`}>{message}</div>}
         </div>
         <aside className="editor-side">
           <div className="btn-row">

@@ -233,7 +233,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
         <span className="muted">{rtt ? `ping ${rtt}ms` : ''}</span>
       </header>
       <div className="online-body">
-        <div className="panel my-horn">
+        <div className={`panel my-horn ${phase === 'room' ? 'hide-mobile' : ''}`}>
           <h4>あなたの角</h4>
           <HornPreview polygon={me.polygon} material={me.material} width={220} height={150} />
           <div>
@@ -312,7 +312,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
                   <div key={i} className={`slot ${i === room.you ? 'you' : ''}`}>
                     {p ? (
                       <>
-                        <HornPreview polygon={p.polygon} material={p.material} width={170} height={120} />
+                        <HornPreview polygon={p.polygon} material={p.material} fluid aspect={0.75} />
                         <div className="pname">
                           {p.name}
                           {i === room.you ? '（あなた）' : ''}
@@ -333,7 +333,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
               })}
             </div>
             <button
-              className="primary big"
+              className="primary big ready-btn"
               disabled={!room.players[0] || !room.players[1]}
               onClick={() => {
                 sfx.click();

@@ -27,6 +27,22 @@ export function saveServerUrl(url: string) {
   }
 }
 
+/** https:// → wss:// への置き換えと、末尾の /ws の付け忘れを補う */
+export function normalizeServerUrl(raw: string): string {
+  let u = raw.trim();
+  if (!u) return u;
+  if (u.startsWith('https://')) u = 'wss://' + u.slice(8);
+  else if (u.startsWith('http://')) u = 'ws://' + u.slice(7);
+  else if (!/^wss?:\/\//.test(u)) u = 'wss://' + u;
+  try {
+    const p = new URL(u);
+    if (p.pathname === '' || p.pathname === '/') p.pathname = '/ws';
+    return p.toString().replace(/\/$/, '');
+  } catch {
+    return u;
+  }
+}
+
 export class NetClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<(m: ServerMsg) => void>();
@@ -40,7 +56,9 @@ export class NetClient {
   /** 再接続時に resume を送るか（ルーム/試合中） */
   resumable = false;
 
-  constructor(public url: string) {}
+  constructor(public url: string) {
+    this.url = normalizeServerUrl(url);
+  }
 
   connect(): Promise<void> {
     this.wantOpen = true;

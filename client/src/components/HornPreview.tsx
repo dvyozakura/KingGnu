@@ -1,5 +1,5 @@
 /** 角のプレビュー。animate=true のとき頭を振って、材質のしなりを実際の物理で見せる */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { COW, HeadFrame, HornBody, MaterialId, Poly, WORLD, buildHornModel } from '@kinggnu/shared';
 import { drawCowBody, drawCowHead } from '../render/cow';
 import { drawHorn } from '../render/hornRender';
@@ -12,6 +12,9 @@ interface Props {
   height?: number;
   animate?: boolean;
   showBody?: boolean;
+  /** 親要素の幅いっぱいに広げる（高さは幅×aspect） */
+  fluid?: boolean;
+  aspect?: number;
 }
 
 export function fakeFighter(x: number, theta: number, extra: Partial<FighterView> = {}): FighterView {
@@ -44,9 +47,22 @@ export function fakeFighter(x: number, theta: number, extra: Partial<FighterView
   };
 }
 
-export function HornPreview({ polygon, material, width = 260, height = 200, animate = false, showBody = false }: Props) {
+export function HornPreview({ polygon, material, width: w0 = 260, height: h0 = 200, animate = false, showBody = false, fluid = false, aspect = 0.7 }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [fw, setFw] = useState(0);
   useEffect(() => {
+    if (!fluid || !boxRef.current) return;
+    const el = boxRef.current;
+    const ro = new ResizeObserver(() => setFw(Math.round(el.clientWidth)));
+    ro.observe(el);
+    setFw(Math.round(el.clientWidth));
+    return () => ro.disconnect();
+  }, [fluid]);
+  const width = fluid ? Math.max(80, fw) : w0;
+  const height = fluid ? Math.round(width * aspect) : h0;
+  useEffect(() => {
+    if (fluid && !fw) return;
     const cv = ref.current;
     if (!cv || polygon.length < 3) return;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -74,10 +90,10 @@ export function HornPreview({ polygon, material, width = 260, height = 200, anim
     // 振り回しても収まるよう、根元からの最大半径で表示範囲を決める
     let R = 60;
     for (const [x, y] of polygon) R = Math.max(R, Math.hypot(x, y));
-    const minX = -Math.max(110, R * 0.75) - (showBody ? 60 : 0);
+    const minX = -Math.max(animate ? 110 : 70, R * (animate ? 0.75 : 0.25)) - (showBody ? 60 : 0);
     const maxX = R + 25;
     const minY = -R - 25;
-    const maxY = Math.max(75, animate ? R * 0.7 : 75);
+    const maxY = Math.max(55, animate ? R * 0.7 : 55);
     const ax = fx + COW.pivotX + COW.anchorX;
     const ay = WORLD.groundY + COW.pivotY + COW.anchorY;
     const scale = Math.min(width / (maxX - minX), height / (maxY - minY)) * 0.92;
@@ -134,6 +150,12 @@ export function HornPreview({ polygon, material, width = 260, height = 200, anim
       draw();
     }
     return () => cancelAnimationFrame(raf);
-  }, [polygon, material, width, height, animate, showBody]);
+  }, [polygon, material, width, height, animate, showBody, fluid, fw]);
+  if (fluid)
+    return (
+      <div ref={boxRef} className="horn-preview-box">
+        <canvas ref={ref} style={{ width, height }} className="horn-preview" />
+      </div>
+    );
   return <canvas ref={ref} style={{ width, height }} className="horn-preview" />;
 }
