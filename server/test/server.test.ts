@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createServer, Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
-import { HORN_TEMPLATES, MAX_PACKET_BYTES, MaterialId, PROTOCOL_VERSION, ServerMsg, makeHornData, processOutline, templateStrokes } from '@kinggnu/shared';
+import { HORN_TEMPLATES, MATERIAL_IDS, MAX_PACKET_BYTES, MaterialId, PROTOCOL_VERSION, ServerMsg, makeHornData, processOutline, templateStrokes } from '@kinggnu/shared';
 import { Client, GameServer } from '../src/core/gameServer';
 
 let http: Server;
@@ -253,15 +253,13 @@ test('全テンプレートの角がサーバーで受理される', async () =>
   c.close();
 });
 
-test('オンライン使用禁止の材質（ゴム）は拒否、他の材質は受理', async () => {
+test('全材質（ゴム含む）がオンラインで受理される', async () => {
   const c = new TestClient('B');
   await c.open();
-  await c.hello('classic', 'rubber');
-  const e = await c.wait('err');
-  assert.equal(e.code, 'banned_material');
-  for (const m of ['fire', 'iron', 'gold', 'coral', 'glass'] as const) {
+  for (const m of MATERIAL_IDS) {
     await c.hello('classic', m);
-    await c.wait('welcome');
+    const w = await c.wait('welcome');
+    assert.equal(w.horn.material, m);
   }
   c.close();
 });

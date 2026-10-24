@@ -323,7 +323,7 @@ export function materialBars(id: MaterialId) {
 }
 
 /** オンライン対戦で一時的に使用禁止の材質（サーバーでも拒否する） */
-export const ONLINE_BANNED: MaterialId[] = ['rubber'];
+export const ONLINE_BANNED: MaterialId[] = [];
 
 export function isOnlineAllowed(id: MaterialId): boolean {
   return !ONLINE_BANNED.includes(id);
