@@ -20,6 +20,8 @@ export const MATCH = {
   drawHpRatio: 0.02,
   /** 角の残り長さがこれ未満になると敗北 */
   hornLossRatio: 0.15,
+  /** 開始位置：ステージ両端からの距離（両端スタート） */
+  startInset: 40,
 } as const;
 
 /** 角の形状処理 */

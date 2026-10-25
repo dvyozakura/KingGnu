@@ -114,7 +114,7 @@ export class Match {
   constructor(a: HornSetup, b: HornSetup, opts: { countdown?: number; timeLimit?: number } = {}) {
     const ma = buildHornModel(a.polygon);
     const mb = buildHornModel(b.polygon);
-    this.fighters = [new Fighter(0, ma, a.material, 380), new Fighter(1, mb, b.material, WORLD.width - 380)];
+    this.fighters = [new Fighter(0, ma, a.material, WORLD.arenaMinX + MATCH.startInset), new Fighter(1, mb, b.material, WORLD.arenaMaxX - MATCH.startInset)];
     this.fighters[0].name = a.name ?? 'P1';
     this.fighters[1].name = b.name ?? 'P2';
     if (opts.countdown !== undefined) this.countdown = opts.countdown;
