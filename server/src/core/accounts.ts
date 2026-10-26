@@ -5,6 +5,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   DAILY_BONUS,
+  PREREG_PROMO,
   DEFAULT_SKIN,
   FREE_MATERIALS,
   HORN_SLOTS_FREE,
@@ -224,7 +225,7 @@ export class AccountService {
   /* ---------------- 課金 ---------------- */
 
   /** 課金アイテムを付与（同じトランザクションは1回だけ）。付与したら true */
-  grantProduct(rec: AccountRecord, product: ProductId, tx: string, source: 'revenuecat' | 'test', sandbox: boolean, now = Date.now()): boolean {
+  grantProduct(rec: AccountRecord, product: ProductId, tx: string, source: 'revenuecat' | 'test' | 'promo', sandbox: boolean, now = Date.now()): boolean {
     if (rec.txns.includes(tx)) return false;
     const def = PRODUCTS[product];
     rec.txns.push(tx);
@@ -254,6 +255,15 @@ export class AccountService {
       if (this.grantProduct(rec, t.product, `rc:${t.id}`, 'revenuecat', t.sandbox, now)) granted.push(t.product);
     }
     return granted;
+  }
+
+  /** 一時的なキャンペーン：無料でエメラルドを付与 */
+  promoClaim(rec: AccountRecord, product: ProductId, now = Date.now()): string[] {
+    if (!PREREG_PROMO) throw new AcctError('promo_ended');
+    if (product === 'kinghorn.slots8' && rec.slotsPremium) throw new AcctError('already_owned');
+    if (product === 'kinghorn.noads' && rec.noAds) throw new AcctError('already_owned');
+    this.grantProduct(rec, product, `promo:${now}:${Math.random().toString(36).slice(2)}`, 'promo', false, now);
+    return [product];
   }
 
   /** 開発用：ストアを通さずに購入したことにする（サーバー設定で許可したときだけ） */

@@ -1,6 +1,6 @@
 /** ショップ：エメラルド・保存枠拡張・広告削除の購入、材質の解放 */
 import { useEffect, useState } from 'react';
-import { FREE_MATERIALS, MATERIALS, MATERIAL_IDS, MATERIAL_UNLOCK_COST, PRODUCTS, PRODUCT_IDS, ProductId, ownsMaterial } from '@kinggnu/shared';
+import { PREREG_PROMO, FREE_MATERIALS, MATERIALS, MATERIAL_IDS, MATERIAL_UNLOCK_COST, PRODUCTS, PRODUCT_IDS, ProductId, ownsMaterial } from '@kinggnu/shared';
 import native from '@native-bridge';
 import { account, accountErrorText, useAccount } from '../account/session';
 import { EmeraldIcon, Emeralds } from '../components/Emerald';
@@ -34,6 +34,11 @@ export function Shop({ onBack, onSkins }: Props) {
     setMsg('');
     setBusy(p);
     try {
+      if (PREREG_PROMO) {
+        const r = await account.op({ op: 'promoClaim', product: p });
+        setMsg(r.ok ? `受け取りました：${PRODUCTS[p].name}` : accountErrorText(r.error));
+        return;
+      }
       if (native.platform === 'web') {
         if (!TEST_PURCHASES) {
           setMsg('購入はアプリ版（iPhone / Android）でできます');
@@ -105,6 +110,7 @@ export function Shop({ onBack, onSkins }: Props) {
         {!online && <div className="toast warn static">{status === 'connecting' ? 'サーバーに接続中…' : 'サーバーに接続できません。購入・解放は接続中のみできます'}</div>}
         <section className="panel">
           <h3>アイテム</h3>
+          {PREREG_PROMO && <div className="promo-banner">🎉 事前登録特典：期間中はアイテムがすべて無料！</div>}
           <div className="products">
             {PRODUCT_IDS.map((p) => {
               const d = PRODUCTS[p];
@@ -117,18 +123,20 @@ export function Shop({ onBack, onSkins }: Props) {
                     <span>{d.description}</span>
                   </div>
                   <button className={have ? '' : 'primary'} disabled={have || !online || !!busy} onClick={() => buy(p)}>
-                    {have ? '購入済み' : busy === p ? '…' : (prices[p] ?? `¥${d.priceJpy}`)}
+                    {have ? (PREREG_PROMO ? '受け取り済み' : '購入済み') : busy === p ? '…' : PREREG_PROMO ? '無料' : (prices[p] ?? `¥${d.priceJpy}`)}
                   </button>
                 </div>
               );
             })}
           </div>
-          <div className="btn-row">
-            <button className="small" disabled={!online || !!busy} onClick={restore}>
-              購入を復元
-            </button>
-            {native.platform === 'web' && <span className="hint">{TEST_PURCHASES ? '開発モード：ストアを通さないテスト購入になります' : '購入はアプリ版でできます'}</span>}
-          </div>
+          {!PREREG_PROMO && (
+            <div className="btn-row">
+              <button className="small" disabled={!online || !!busy} onClick={restore}>
+                購入を復元
+              </button>
+              {native.platform === 'web' && <span className="hint">{TEST_PURCHASES ? '開発モード：ストアを通さないテスト購入になります' : '購入はアプリ版でできます'}</span>}
+            </div>
+          )}
         </section>
         <section className="panel">
           <h3>

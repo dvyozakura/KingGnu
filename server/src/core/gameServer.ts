@@ -670,6 +670,9 @@ export class GameServer {
         case 'syncPurchases':
           granted = await acc.syncPurchases(rec, now);
           break;
+        case 'promoClaim':
+          granted = acc.promoClaim(rec, op.product, now);
+          break;
         case 'testPurchase':
           granted = acc.testPurchase(rec, op.product, now);
           break;

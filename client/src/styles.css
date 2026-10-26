@@ -1325,3 +1325,12 @@ button.signin.google {
     font-size: 0.8rem;
   }
 }
+.promo-banner {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #ff7a59, #ffd34d);
+  color: #2a1a00;
+  font-weight: 900;
+  text-align: center;
+}

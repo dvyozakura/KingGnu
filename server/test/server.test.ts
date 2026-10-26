@@ -542,3 +542,21 @@ test('レート戦のCPUは実際に戦う（放置すると負ける）', { tim
   assert.ok(rt.delta <= 0);
   c.close();
 });
+
+test('事前登録特典：ショップのアイテムがすべて無料', async () => {
+  const c = new TestClient('Free');
+  await c.open();
+  await c.auth(false);
+  let r = await c.rpc({ t: 'acct', op: 'promoClaim', product: 'kinghorn.emerald100' });
+  assert.ok(r.ok);
+  assert.equal(r.profile!.emeralds, 110);
+  r = await c.rpc({ t: 'acct', op: 'promoClaim', product: 'kinghorn.emerald100' });
+  assert.equal(r.profile!.emeralds, 210);
+  r = await c.rpc({ t: 'acct', op: 'promoClaim', product: 'kinghorn.slots8' });
+  assert.equal(r.profile!.slots, 8);
+  r = await c.rpc({ t: 'acct', op: 'promoClaim', product: 'kinghorn.noads' });
+  assert.equal(r.profile!.noAds, true);
+  r = await c.rpc({ t: 'acct', op: 'promoClaim', product: 'kinghorn.noads' });
+  assert.equal(r.error, 'already_owned');
+  c.close();
+});

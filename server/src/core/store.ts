@@ -20,7 +20,7 @@ export interface PurchaseRecord {
   product: string;
   tx: string;
   at: number;
-  source: 'revenuecat' | 'test';
+  source: 'revenuecat' | 'test' | 'promo';
   sandbox?: boolean;
 }
 

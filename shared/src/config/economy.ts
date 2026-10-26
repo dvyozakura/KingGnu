@@ -36,6 +36,13 @@ export const PRODUCTS: Record<ProductId, ProductDef> = {
 };
 export const PRODUCT_IDS = Object.keys(PRODUCTS) as ProductId[];
 
+/**
+ * 事前登録特典：ショップのアイテムがすべて無料（課金なし）。
+ * エメラルドは押すたびに100個、保存枠の拡張・広告削除は1回受け取ればずっと有効。
+ * 本物の課金を始めるときは false にする（サーバーとクライアントの両方がこの値を見る）。
+ */
+export const PREREG_PROMO = true;
+
 export function isProductId(v: unknown): v is ProductId {
   return typeof v === 'string' && v in PRODUCTS;
 }

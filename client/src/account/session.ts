@@ -38,6 +38,7 @@ export const ACCOUNT_ERRORS: Record<string, string> = {
   offline: 'サーバーに接続できません。通信環境を確認してください',
   timeout: 'サーバーから応答がありません',
   rate_limited: '操作が速すぎます',
+  promo_ended: '無料配布は終了しました',
 };
 
 export function accountErrorText(code: string | undefined): string {

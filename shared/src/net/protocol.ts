@@ -24,7 +24,8 @@ export type AcctOp =
   | { op: 'deleteHorn'; slot: number }
   | { op: 'setName'; name: string }
   | { op: 'syncPurchases' }
-  | { op: 'testPurchase'; product: ProductId };
+  | { op: 'testPurchase'; product: ProductId }
+  | { op: 'promoClaim'; product: ProductId };
 
 export type AuthMethod = 'guest' | 'session' | 'apple' | 'google';
 
@@ -134,6 +135,9 @@ export function parseClientMsg(raw: unknown): { msg?: ClientMsg; error?: string 
           return { msg: { t: 'acct', rid, op: 'deleteHorn', slot: m.slot as number } };
         case 'setName':
           return { msg: { t: 'acct', rid, op: 'setName', name: sanitizeName(m.name, 'Player', 16) } };
+        case 'promoClaim':
+          if (!isProductId(m.product)) return { error: 'bad_acct' };
+          return { msg: { t: 'acct', rid, op: 'promoClaim', product: m.product } };
         case 'testPurchase':
           if (!isProductId(m.product)) return { error: 'bad_acct' };
           return { msg: { t: 'acct', rid, op: 'testPurchase', product: m.product } };
