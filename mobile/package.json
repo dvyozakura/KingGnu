@@ -1,0 +1,26 @@
+{
+  "name": "kinghorn-mobile",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "King Horn の iOS / Android アプリ（Capacitor）。Web 版のコードをそのまま包む",
+  "scripts": {
+    "build:web": "node scripts/build-web.mjs",
+    "add:android": "npx cap add android",
+    "add:ios": "npx cap add ios",
+    "configure": "node scripts/configure-native.mjs",
+    "sync": "npm run build:web && npx cap sync",
+    "open:android": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "latest",
+    "@capacitor/core": "latest",
+    "@capacitor/ios": "latest",
+    "@capacitor-community/admob": "latest",
+    "@capgo/capacitor-social-login": "latest",
+    "@revenuecat/purchases-capacitor": "latest"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "latest"
+  }
+}

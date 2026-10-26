@@ -1,0 +1,11 @@
+{
+  "appId": "jp.yein.kinghorn",
+  "appName": "King Horn",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "ios": {
+    "contentInset": "never"
+  }
+}

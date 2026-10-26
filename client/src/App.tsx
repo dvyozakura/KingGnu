@@ -1,5 +1,10 @@
-import { useState } from 'react';
-import { MaterialId, ONLINE_BANNED, processOutline, templateStrokes } from '@kinggnu/shared';
+import { useEffect, useState } from 'react';
+import { MaterialId, ONLINE_BANNED, SKIN_IDS, processOutline, templateStrokes } from '@kinggnu/shared';
+import { afterMatchAd } from './account/ads';
+import { account, useAccount } from './account/session';
+import { LoginBonus } from './components/AccountOverlays';
+import { Shop } from './screens/Shop';
+import { Skins } from './screens/Skins';
 import { BattleResult, LocalSource } from './game/source';
 import { Battle } from './screens/Battle';
 import { CpuChoice, CpuSetup, resolveCpu } from './screens/CpuSetup';
@@ -9,7 +14,7 @@ import { Online } from './screens/Online';
 import { Result } from './screens/Result';
 import { Title } from './screens/Title';
 
-type Screen = 'title' | 'editor' | 'material' | 'cpu' | 'battle' | 'result' | 'online';
+type Screen = 'title' | 'editor' | 'material' | 'cpu' | 'battle' | 'result' | 'online' | 'shop' | 'skins';
 type Mode = 'cpu' | 'online';
 
 const initialStrokes = templateStrokes('classic');
@@ -21,7 +26,23 @@ const initialDraft: HornDraft = {
 };
 
 export function App() {
-  const [screen, setScreen] = useState<Screen>('title');
+  return (
+    <>
+      <Screens />
+      <LoginBonus />
+    </>
+  );
+}
+
+function Screens() {
+  const [screen, setScreenRaw] = useState<Screen>('title');
+  const [back, setBack] = useState<Screen>('title');
+  const { profile } = useAccount();
+  useEffect(() => account.start(), []);
+  const setScreen = (s: Screen) => {
+    if (s === 'shop' || s === 'skins') setBack((b) => (screen === 'shop' || screen === 'skins' ? b : screen));
+    setScreenRaw(s);
+  };
   const [mode, setMode] = useState<Mode>('cpu');
   const [draft, setDraft] = useState<HornDraft>(initialDraft);
   const [cpu, setCpu] = useState<CpuChoice>({ difficulty: 'normal', material: 'random', template: 'random' });
@@ -35,8 +56,8 @@ export function App() {
     source?.dispose();
     setSource(
       new LocalSource({
-        player: { polygon: draft.polygon, material: draft.material, name: draft.name || 'YOU' },
-        cpu: { polygon: resolved.polygon, material: resolved.material, name: `${label}（${resolved.templateName}）` },
+        player: { polygon: draft.polygon, material: draft.material, name: draft.name || 'YOU', skin: profile?.skin },
+        cpu: { polygon: resolved.polygon, material: resolved.material, name: `${label}（${resolved.templateName}）`, skin: SKIN_IDS[Math.floor(Math.random() * SKIN_IDS.length)] },
         difficulty: c.difficulty,
       }),
     );
@@ -55,6 +76,8 @@ export function App() {
             setMode('online');
             setScreen('editor');
           }}
+          onShop={() => setScreen('shop')}
+          onSkins={() => setScreen('skins')}
         />
       );
     case 'editor':
@@ -62,6 +85,7 @@ export function App() {
         <HornEditor
           initial={draft}
           onBack={() => setScreen('title')}
+          onShop={() => setScreen('shop')}
           onDone={(d) => {
             setDraft(d);
             setScreen('material');
@@ -76,6 +100,7 @@ export function App() {
           nextLabel={mode === 'cpu' ? '決定 → CPU設定' : '決定 → オンラインへ'}
           disabled={mode === 'online' ? ONLINE_BANNED : []}
           disabledLabel="オンライン禁止"
+          onShop={() => setScreen('shop')}
           onBack={() => setScreen('editor')}
           onDone={(m: MaterialId) => {
             setDraft({ ...draft, material: m });
@@ -102,6 +127,7 @@ export function App() {
           onEnd={(r) => {
             setResult(r);
             setScreen('result');
+            void afterMatchAd();
           }}
         />
       ) : null;
@@ -126,5 +152,9 @@ export function App() {
           onEditHorn={() => setScreen('editor')}
         />
       );
+    case 'shop':
+      return <Shop onBack={() => setScreen(back)} onSkins={() => setScreen('skins')} />;
+    case 'skins':
+      return <Skins onBack={() => setScreen(back)} onShop={() => setScreen('shop')} />;
   }
 }

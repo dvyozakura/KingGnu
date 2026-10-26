@@ -15,6 +15,8 @@ interface Props {
   /** 親要素の幅いっぱいに広げる（高さは幅×aspect） */
   fluid?: boolean;
   aspect?: number;
+  /** 牛のスキン */
+  skin?: string;
 }
 
 export function fakeFighter(x: number, theta: number, extra: Partial<FighterView> = {}): FighterView {
@@ -48,7 +50,7 @@ export function fakeFighter(x: number, theta: number, extra: Partial<FighterView
   };
 }
 
-export function HornPreview({ polygon, material, width: w0 = 260, height: h0 = 200, animate = false, showBody = false, fluid = false, aspect = 0.7 }: Props) {
+export function HornPreview({ polygon, material, width: w0 = 260, height: h0 = 200, animate = false, showBody = false, fluid = false, aspect = 0.7, skin }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [fw, setFw] = useState(0);
@@ -125,7 +127,7 @@ export function HornPreview({ polygon, material, width: w0 = 260, height: h0 = 2
       ctx.translate(width / 2, height / 2);
       ctx.scale(scale, scale);
       ctx.translate(-(ax + (minX + maxX) / 2), -(ay + (minY + maxY) / 2));
-      const f = fakeFighter(fx, theta, { material });
+      const f = fakeFighter(fx, theta, { material, skin });
       if (showBody) drawCowBody(ctx, f, t, '#e74c3c');
       drawHorn(ctx, {
         model,
@@ -151,7 +153,7 @@ export function HornPreview({ polygon, material, width: w0 = 260, height: h0 = 2
       draw();
     }
     return () => cancelAnimationFrame(raf);
-  }, [polygon, material, width, height, animate, showBody, fluid, fw]);
+  }, [polygon, material, width, height, animate, showBody, fluid, fw, skin]);
   if (fluid)
     return (
       <div ref={boxRef} className="horn-preview-box">

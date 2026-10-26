@@ -1,5 +1,6 @@
 export * from './config/game';
 export * from './config/materials';
+export * from './config/economy';
 export * from './geometry/polygon';
 export * from './geometry/decompose';
 export * from './horn/outline';

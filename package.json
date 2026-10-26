@@ -2,7 +2,7 @@
   "name": "kinggnu",
   "private": true,
   "version": "1.0.0",
-  "description": "KingGnu — 自分で描いた牛の角で殴り合う物理演算バトルゲーム",
+  "description": "King Horn — 自分で描いた牛の角で殴り合う物理演算バトルゲーム",
   "license": "MIT",
   "type": "module",
   "workspaces": [

@@ -29,8 +29,8 @@ export function Result({ result, actions, note }: Props) {
     else sfx.lose();
   }, [win, draw]);
   const rows: [string, (i: 0 | 1) => string][] = [
-    ['与えたダメージ', (i) => `${result.stats[i].dealt}`],
-    ['受けた反作用ダメージ', (i) => `${result.stats[i].recoilTaken}`],
+    ['与えたダメージ', (i) => `${Math.round(result.stats[i].dealt)}`],
+    ['受けた反作用ダメージ', (i) => `${Math.round(result.stats[i].recoilTaken)}`],
     ['最大衝突速度', (i) => `${result.stats[i].maxImpactSpeed} px/s`],
     ['最大単発ダメージ', (i) => `${result.stats[i].maxHit}`],
     ['ヒット数（しなり）', (i) => `${result.stats[i].hits}（${result.stats[i].whipHits}）`],

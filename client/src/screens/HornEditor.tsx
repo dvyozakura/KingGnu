@@ -19,7 +19,9 @@ import {
   validateHornData,
 } from '@kinggnu/shared';
 import { sfx } from '../game/audio';
-import { SavedHorn, downloadText, hornStore } from '../game/storage';
+import { downloadText } from '../game/storage';
+import { account, accountErrorText, useAccount } from '../account/session';
+import { HORN_SLOTS_PREMIUM, ownsMaterial } from '@kinggnu/shared';
 import { drawCowBody, drawCowHead } from '../render/cow';
 import { drawHorn } from '../render/hornRender';
 import { fakeFighter } from '../components/HornPreview';
@@ -35,11 +37,15 @@ interface Props {
   initial: HornDraft;
   onDone: (d: HornDraft) => void;
   onBack: () => void;
+  onShop?: () => void;
 }
 
 const VIEW = { minX: -170, maxX: 290, minY: -290, maxY: 130 };
 
-export function HornEditor({ initial, onDone, onBack }: Props) {
+export function HornEditor({ initial, onDone, onBack, onShop }: Props) {
+  const { profile, status } = useAccount();
+  const [material, setMaterial] = useState(initial.material);
+  const [slotBusy, setSlotBusy] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [strokes, setStrokes] = useState<Poly[]>(initial.strokes.length ? initial.strokes : initial.polygon.length ? [initial.polygon] : []);
@@ -63,7 +69,6 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
       clearTimeout(t2);
     };
   }, [msgId]);
-  const [saved, setSaved] = useState<SavedHorn[]>(() => hornStore.list());
   const [importText, setImportText] = useState('');
   const [showIO, setShowIO] = useState(false);
   const drawing = useRef<Pt[] | null>(null);
@@ -139,7 +144,7 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
       // 牛（頭の上の印が角の根元）
       ctx.save();
       ctx.translate(0, -(WORLD.groundY + COW.pivotY + COW.anchorY));
-      const f = fakeFighter(-COW.anchorX - COW.pivotX, 0, { material: initial.material });
+      const f = fakeFighter(-COW.anchorX - COW.pivotX, 0, { material: material });
       drawCowBody(ctx, f, 0, '#e74c3c');
       ctx.restore();
       // 角
@@ -152,7 +157,7 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
           nodesY,
           facing: 1,
           widthScale: 1,
-          material: initial.material,
+          material: material,
           stress: 0,
           crackLevel: 0,
           cracks: [],
@@ -234,7 +239,7 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
     };
     render();
     return () => cancelAnimationFrame(raf);
-  }, [model, showHit, strokes.length, initial.material]);
+  }, [model, showHit, strokes.length, material]);
 
   const toLocal = (e: RPointerEvent): Pt => {
     const r = canvasRef.current!.getBoundingClientRect();
@@ -276,7 +281,7 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
   const finalize = () => {
     if (!outline?.ok) return;
     sfx.click();
-    onDone({ name: name || 'My Horn', strokes, polygon: outline.polygon, material: initial.material });
+    onDone({ name: name || 'My Horn', strokes, polygon: outline.polygon, material: material });
   };
 
   const loadPoly = (poly: Poly, nm?: string) => {
@@ -305,7 +310,7 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
   };
 
   const stats = model?.stats;
-  const mat = MATERIALS[initial.material];
+  const mat = MATERIALS[material];
   const mass = stats ? (stats.area * mat.density * 0.008).toFixed(1) : '-';
 
   return (
@@ -403,24 +408,71 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
           <label className="check">
             <input type="checkbox" checked={showHit} onChange={(e) => setShowHit(e.target.checked)} /> 当たり判定（凸分解）と節点を表示
           </label>
-          <h4>保存・共有</h4>
+          <h4>
+            角の保存 <small className="muted">（{profile?.slots ?? 2}枠）</small>
+          </h4>
+          <div className="slot-list">
+            {Array.from({ length: profile?.slots ?? 2 }, (_, i) => {
+              const h = profile?.horns[i] ?? null;
+              const online = status === 'online';
+              const save = async () => {
+                if (!outline?.ok) return;
+                if (h && !window.confirm(`「${h.name}」に上書きしますか？`)) return;
+                setSlotBusy(true);
+                const r = await account.op({ op: 'saveHorn', slot: i, horn: makeHornData(name || 'My Horn', material, outline.polygon) });
+                setSlotBusy(false);
+                setMessage(r.ok ? `枠${i + 1}に保存しました` : accountErrorText(r.error));
+              };
+              return (
+                <div key={i} className={`slot-item ${h ? '' : 'empty'}`}>
+                  <span className="slot-no">{i + 1}</span>
+                  {h ? (
+                    <button
+                      className="link"
+                      onClick={() => {
+                        loadPoly(h.vertices, h.name);
+                        if (ownsMaterial(profile, h.material)) setMaterial(h.material);
+                        setMessage(`「${h.name}」を読み込みました`);
+                      }}
+                    >
+                      {h.name} <span className="muted">({MATERIALS[h.material].name})</span>
+                    </button>
+                  ) : (
+                    <span className="muted">空き</span>
+                  )}
+                  <button className="small" disabled={!outline?.ok || !online || slotBusy} onClick={save} title={h ? '上書き保存' : '保存'}>
+                    💾
+                  </button>
+                  {h && (
+                    <button
+                      className="x"
+                      aria-label="削除"
+                      disabled={!online || slotBusy}
+                      onClick={async () => {
+                        if (!window.confirm(`「${h.name}」を削除しますか？`)) return;
+                        const r = await account.op({ op: 'deleteHorn', slot: i });
+                        if (!r.ok) setMessage(accountErrorText(r.error));
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {status !== 'online' && <p className="hint">保存はサーバーに接続中のみできます</p>}
+          {(profile?.slots ?? 2) < HORN_SLOTS_PREMIUM && (
+            <button className="small" onClick={onShop}>
+              保存枠を {HORN_SLOTS_PREMIUM} つに増やす（ショップ）
+            </button>
+          )}
+          <h4>共有</h4>
           <div className="btn-row">
             <button
               className="small"
               disabled={!outline?.ok}
-              onClick={() => {
-                if (!outline?.ok) return;
-                hornStore.save(makeHornData(name || 'My Horn', initial.material, outline.polygon));
-                setSaved(hornStore.list());
-                setMessage('保存しました');
-              }}
-            >
-              💾 保存
-            </button>
-            <button
-              className="small"
-              disabled={!outline?.ok}
-              onClick={() => outline?.ok && downloadText(`${(name || 'horn').replace(/[^\w\-]+/g, '_')}.json`, hornDataToJSON(makeHornData(name, initial.material, outline.polygon)))}
+              onClick={() => outline?.ok && downloadText(`${(name || 'horn').replace(/[^\w\-]+/g, '_')}.json`, hornDataToJSON(makeHornData(name, material, outline.polygon)))}
             >
               ⬇ JSON書き出し
             </button>
@@ -442,27 +494,6 @@ export function HornEditor({ initial, onDone, onBack }: Props) {
               <button className="small" onClick={() => doImport(importText)}>
                 貼り付けたJSONを読み込む
               </button>
-            </div>
-          )}
-          {saved.length > 0 && (
-            <div className="saved-list">
-              {saved.map((h) => (
-                <div key={h.id} className="saved-item">
-                  <button className="link" onClick={() => loadPoly(h.vertices, h.name)}>
-                    {h.name} <span className="muted">({MATERIALS[h.material].name})</span>
-                  </button>
-                  <button
-                    className="x"
-                    aria-label="削除"
-                    onClick={() => {
-                      hornStore.remove(h.id);
-                      setSaved(hornStore.list());
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
             </div>
           )}
           <button className="primary big" disabled={!outline?.ok} onClick={finalize}>

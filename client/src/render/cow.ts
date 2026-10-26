@@ -1,5 +1,5 @@
 /** 牛の描画（オリジナルのシンプルなキャラクター） */
-import { COW, WORLD } from '@kinggnu/shared';
+import { COW, SkinDef, WORLD, skinDef } from '@kinggnu/shared';
 import { FighterView } from './view';
 
 const SPOTS: [number, number, number, number][] = [
@@ -9,7 +9,59 @@ const SPOTS: [number, number, number, number][] = [
   [36, -100, 10, 8],
 ];
 
+/** スキンの模様（胴体）。胴体の角丸四角でクリップ済みの状態で呼ぶ */
+function bodyPattern(ctx: CanvasRenderingContext2D, sk: SkinDef, dy: number) {
+  ctx.fillStyle = sk.spot;
+  switch (sk.pattern) {
+    case 'holstein':
+      for (const [sx, sy, rx, ry] of SPOTS) {
+        ctx.beginPath();
+        ctx.ellipse(sx, sy + dy, rx, ry, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    case 'dots':
+      for (let i = 0; i < 18; i++) {
+        const x = -64 + ((i * 37) % 128);
+        const y = -118 + ((i * 23) % 64);
+        ctx.beginPath();
+        ctx.arc(x, y + dy, 4 + (i % 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    case 'stripes':
+      ctx.strokeStyle = sk.spot;
+      ctx.lineWidth = 7;
+      for (let x = -60; x <= 60; x += 20) {
+        ctx.beginPath();
+        ctx.moveTo(x - 6, -130 + dy);
+        ctx.quadraticCurveTo(x + 8, -88 + dy, x - 4, -44 + dy);
+        ctx.stroke();
+      }
+      break;
+    case 'panda':
+      ctx.fillRect(-12, -140 + dy, 34, 110);
+      break;
+    case 'stars':
+      for (let i = 0; i < 9; i++) star4(ctx, -60 + ((i * 41) % 120), -116 + ((i * 29) % 56) + dy, 3 + (i % 3) * 1.5);
+      break;
+    case 'plain':
+      break;
+  }
+}
+
+function star4(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x, y - r * 2);
+  ctx.quadraticCurveTo(x, y, x + r * 2, y);
+  ctx.quadraticCurveTo(x, y, x, y + r * 2);
+  ctx.quadraticCurveTo(x, y, x - r * 2, y);
+  ctx.quadraticCurveTo(x, y, x, y - r * 2);
+  ctx.fill();
+}
+
 export function drawCowBody(ctx: CanvasRenderingContext2D, f: FighterView, t: number, tint: string) {
+  const sk = skinDef(f.skin);
   const g = WORLD.groundY;
   ctx.save();
   ctx.translate(f.x, g);
@@ -33,35 +85,35 @@ export function drawCowBody(ctx: CanvasRenderingContext2D, f: FighterView, t: nu
   for (const [lx, ph] of legs) {
     const sw = walk * 12 * ph;
     ctx.lineWidth = 15;
-    ctx.strokeStyle = '#efe9df';
+    ctx.strokeStyle = sk.leg;
     ctx.beginPath();
     ctx.moveTo(lx, -60 + crouch);
     ctx.lineTo(lx + sw, -8);
     ctx.stroke();
     ctx.lineWidth = 15;
-    ctx.strokeStyle = '#3a302a';
+    ctx.strokeStyle = sk.hoof;
     ctx.beginPath();
     ctx.moveTo(lx + sw, -10);
     ctx.lineTo(lx + sw, -2);
     ctx.stroke();
   }
   // しっぽ
-  ctx.strokeStyle = '#efe9df';
+  ctx.strokeStyle = sk.leg;
   ctx.lineWidth = 5;
   ctx.beginPath();
   const tw = Math.sin(t * 5 + f.idx * 2) * 8;
   ctx.moveTo(-COW.bodyHalfW + 4, -110 + crouch);
   ctx.quadraticCurveTo(-COW.bodyHalfW - 22, -90 + tw, -COW.bodyHalfW - 16, -62 + tw);
   ctx.stroke();
-  ctx.fillStyle = '#3a302a';
+  ctx.fillStyle = sk.hoof;
   ctx.beginPath();
   ctx.ellipse(-COW.bodyHalfW - 16, -58 + tw, 5, 8, 0.2, 0, Math.PI * 2);
   ctx.fill();
   // 胴体
   const cy = COW.bodyCenterY + crouch * 0.6;
   const bodyGrad = ctx.createLinearGradient(0, cy - COW.bodyHalfH, 0, cy + COW.bodyHalfH);
-  bodyGrad.addColorStop(0, '#fffdf8');
-  bodyGrad.addColorStop(1, '#e4ddd0');
+  bodyGrad.addColorStop(0, sk.body[0]);
+  bodyGrad.addColorStop(1, sk.body[1]);
   ctx.fillStyle = bodyGrad;
   ctx.strokeStyle = '#2b2622';
   ctx.lineWidth = 3;
@@ -69,12 +121,7 @@ export function drawCowBody(ctx: CanvasRenderingContext2D, f: FighterView, t: nu
   ctx.fill();
   ctx.save();
   ctx.clip();
-  ctx.fillStyle = '#2f2925';
-  for (const [sx, sy, rx, ry] of SPOTS) {
-    ctx.beginPath();
-    ctx.ellipse(sx, sy + crouch * 0.6, rx, ry, 0.3, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  bodyPattern(ctx, sk, crouch * 0.6);
   // チームカラーの首輪
   ctx.restore();
   ctx.stroke();
@@ -93,6 +140,7 @@ export function drawCowBody(ctx: CanvasRenderingContext2D, f: FighterView, t: nu
 }
 
 export function drawCowHead(ctx: CanvasRenderingContext2D, f: FighterView, t: number, ko: boolean) {
+  const sk = skinDef(f.skin);
   const px = f.x + f.facing * COW.pivotX;
   const py = WORLD.groundY + COW.pivotY + (f.phase === 'charge' ? 6 * f.charge : 0);
   ctx.save();
@@ -102,7 +150,7 @@ export function drawCowHead(ctx: CanvasRenderingContext2D, f: FighterView, t: nu
   const hx = COW.headCX;
   const hy = COW.headCY;
   // 耳
-  ctx.fillStyle = '#efe9df';
+  ctx.fillStyle = sk.pattern === 'panda' ? sk.spot : sk.body[0];
   ctx.strokeStyle = '#2b2622';
   ctx.lineWidth = 2.5;
   const earWig = Math.sin(t * 3 + f.idx) * 0.1 - (f.stun > 0 ? 0.4 : 0);
@@ -120,8 +168,8 @@ export function drawCowHead(ctx: CanvasRenderingContext2D, f: FighterView, t: nu
   ctx.restore();
   // 頭
   const hg = ctx.createRadialGradient(hx - 6, hy - 10, 4, hx, hy, COW.headRX + 6);
-  hg.addColorStop(0, '#ffffff');
-  hg.addColorStop(1, '#e8e0d2');
+  hg.addColorStop(0, sk.body[0]);
+  hg.addColorStop(1, sk.body[1]);
   ctx.fillStyle = hg;
   ctx.beginPath();
   ctx.ellipse(hx, hy, COW.headRX, COW.headRY, 0, 0, Math.PI * 2);
@@ -130,13 +178,37 @@ export function drawCowHead(ctx: CanvasRenderingContext2D, f: FighterView, t: nu
   // ぶち
   ctx.save();
   ctx.clip();
-  ctx.fillStyle = '#2f2925';
-  ctx.beginPath();
-  ctx.ellipse(hx - 18, hy - 14, 14, 10, -0.4, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillStyle = sk.spot;
+  if (sk.pattern === 'holstein') {
+    ctx.beginPath();
+    ctx.ellipse(hx - 18, hy - 14, 14, 10, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (sk.pattern === 'panda') {
+    ctx.beginPath();
+    ctx.ellipse(hx + 6, hy - 6, 11, 9, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (sk.pattern === 'dots') {
+    for (const [dx, dy] of [
+      [-20, -10],
+      [-6, -18],
+      [-14, 6],
+    ])
+      ctx.beginPath(), ctx.arc(hx + dx, hy + dy, 4, 0, Math.PI * 2), ctx.fill();
+  } else if (sk.pattern === 'stripes') {
+    ctx.strokeStyle = sk.spot;
+    ctx.lineWidth = 5;
+    for (const dx of [-22, -10]) {
+      ctx.beginPath();
+      ctx.moveTo(hx + dx, hy - 26);
+      ctx.quadraticCurveTo(hx + dx + 6, hy - 8, hx + dx - 2, hy + 10);
+      ctx.stroke();
+    }
+  } else if (sk.pattern === 'stars') {
+    star4(ctx, hx - 16, hy - 12, 3);
+  }
   ctx.restore();
   // 鼻づら
-  ctx.fillStyle = '#f3a8a0';
+  ctx.fillStyle = sk.snout;
   ctx.beginPath();
   ctx.ellipse(hx + 24, hy + 10, 17, 14, -0.2, 0, Math.PI * 2);
   ctx.fill();

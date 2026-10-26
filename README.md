@@ -1,4 +1,4 @@
-# KING GNU 🐂 — 自分で描いた角で殴り合う物理演算バトル
+# KING HORN 🐂 — 自分で描いた角で殴り合う物理演算バトル
 
 指やマウスで **牛の角の輪郭を自由に描き**、材質を選んで、慣性・しなり・衝突・タイミングで殴り合う 1 対 1 のブラウザゲームです。
 描いた輪郭はそのまま **当たり判定・質量分布・しなり方・攻撃範囲** になり、材質ごとに硬さ・しなり・HP・反作用ダメージが変わります。
@@ -214,6 +214,70 @@ GitHub Actions から出す場合は Secrets に `CLOUDFLARE_API_TOKEN` と `CLO
 - 通信：WebSocket（Node: `ws` / Cloudflare Durable Objects）、サーバー権威 + スナップショット補間
 - テスト：Node.js 標準のテストランナー（`node:test`）+ tsx
 - 画像・音はすべてコードで描画・合成したオリジナル素材です
+
+## 9. アカウント・課金・アプリ版（iOS / Android）
+
+### 仕組み
+
+| 項目 | 内容 |
+|---|---|
+| アカウント | 初回起動で自動的にゲスト登録。アプリ版は「Appleでサインイン」「Googleでサインイン」で機種変更・再インストールしても引き継げる |
+| 保存先 | 対戦サーバー（`server/data/accounts.json`）。毎日 `server/data/backup/` にバックアップ（30日分） |
+| エメラルド | ログインボーナスで毎日10個（日本時間で日付が変わったら）／課金 120円で100個 |
+| 材質 | プラスチック・木・ゴムは最初から。ほかの7種は各20エメラルドで解放 |
+| 牛のスキン | 各100エメラルド。見た目だけで強さは変わらない |
+| 角の保存枠 | 無料で2つ。360円で8つに拡張 |
+| 広告削除 | 120円。アプリ版で試合2回ごとに出る全画面広告が出なくなる |
+| レート戦 | Elo レート（初期1500）。人間の相手が見つからなければサーバーの CPU と対戦する |
+
+エメラルド・解放状況・購入はすべてサーバーが管理し、クライアントからの申告は使いません（未解放の材質やスキンでオンライン対戦に入るとサーバーが拒否します）。
+課金のレシート検証は RevenueCat が行い、サーバーは RevenueCat の API で購入履歴を取得して、同じ購入を二重に付与しないようにしています。
+
+> **課金の記録が自宅 PC に保存されます。** `server/data/` は定期的に別の場所（OneDrive など）にもコピーしてください。PC が壊れると、購入したものを復元できなくなります。
+
+### サーバーの設定（`server/.env.local`）
+
+秘密情報はここに書きます（Git には入りません）。
+
+```
+# RevenueCat のシークレット API キー（sk_...）。課金の確認に使う
+REVENUECAT_SECRET_KEY=
+# Apple でサインインの宛先（アプリの Bundle ID）
+APPLE_BUNDLE_IDS=jp.yein.kinghorn
+# Google でサインインの OAuth クライアントID（Web 用と iOS 用をカンマ区切り）
+GOOGLE_CLIENT_IDS=
+# 開発用のテスト購入（本番では 0 のまま）
+ALLOW_TEST_PURCHASES=0
+```
+
+### アプリ版を出すまでの手順
+
+Mac が無くても、ビルドは GitHub Actions（**Actions → Mobile build → Run workflow**）で行えます。
+
+1. **登録**：Apple Developer Program（年 $99）、Google Play Console（初回 $25）、[RevenueCat](https://www.revenuecat.com/)（無料枠あり）、AdMob、Google Cloud（OAuth）
+2. **ストアに商品を登録**（App Store Connect / Play Console の両方）
+
+   | 商品ID | 種類 | 価格 |
+   |---|---|---|
+   | `kinghorn.emerald100` | 消耗型 | 120円 |
+   | `kinghorn.slots8` | 非消耗型 | 360円 |
+   | `kinghorn.noads` | 非消耗型 | 120円 |
+
+3. **RevenueCat**：プロジェクトに iOS / Android アプリを追加してストアと連携し、上の商品を取り込む。
+   公開 SDK キーを GitHub の Variables（`VITE_REVENUECAT_IOS_KEY` / `VITE_REVENUECAT_ANDROID_KEY`）に、シークレットキーを `server/.env.local` に登録
+4. **AdMob**：アプリを登録し、アプリID を Variables `ADMOB_APP_ID_IOS` / `ADMOB_APP_ID_ANDROID` に、インタースティシャル広告のユニットID を `VITE_ADMOB_INTERSTITIAL_IOS` / `VITE_ADMOB_INTERSTITIAL_ANDROID` に登録（未登録の間はテスト広告）
+5. **サインイン**：Apple の App ID `jp.yein.kinghorn` で「Sign in with Apple」を有効にする。Google Cloud で OAuth クライアント（Web・iOS・Android）を作り、
+   Variables `VITE_GOOGLE_WEB_CLIENT_ID` / `VITE_GOOGLE_IOS_CLIENT_ID` とサーバーの `GOOGLE_CLIENT_IDS` に登録
+6. **ビルド**：Actions の「Mobile build」を実行。Android はデバッグ版 APK がダウンロードでき、iOS はシミュレータ向けビルドが通るか確認できる
+7. **ストア提出**：署名付きビルドと TestFlight / Play Console へのアップロードは、Apple Developer Program 登録後に証明書を Secrets に入れて自動化する（未作成）
+
+`mobile/` 以下が Capacitor のアプリ版です。Web 版と同じコードを包み、課金・広告・サインインだけ `mobile/src/native.ts` で実装しています。
+ネイティブのプロジェクト（`mobile/android`, `mobile/ios`）は Actions で毎回生成し、`npm run configure` で AdMob・Appleでサインイン等の設定を書き込みます。
+
+### Web 版
+
+Web 版（GitHub Pages）もこれまで通り遊べます。アカウントはそのブラウザだけのゲストで、課金と広告はありません（エメラルドはログインボーナスで貯まります）。
+開発中に課金の流れを試すときは、サーバーを `ALLOW_TEST_PURCHASES=1`、クライアントを `npm run dev`（または `VITE_TEST_PURCHASES=1`）で動かすと「テスト購入」になります。
 
 ## ライセンス
 

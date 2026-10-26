@@ -8,8 +8,20 @@
  *  - 入力は接続に紐づいたスロットにしか適用されないので、他プレイヤーの入力は偽装できない
  */
 import {
+  AcctOp,
+  BOT_NAMES,
   ClientMsg,
+  CpuBrain,
+  DEFAULT_SKIN,
+  Difficulty,
+  HORN_TEMPLATES,
   HornData,
+  MATERIAL_IDS,
+  RATING,
+  SKIN_IDS,
+  eloDelta,
+  ownsMaterial,
+  templateStrokes,
   INPUT_RATE_LIMIT,
   MATCH,
   Match,
@@ -29,6 +41,8 @@ import {
   processOutline,
 } from '@kinggnu/shared';
 import { TokenBucket } from './rateLimit';
+import { AccountService, AcctError } from './accounts';
+import { AccountRecord } from './store';
 
 export interface Conn {
   send(data: string): void;
@@ -44,6 +58,8 @@ export interface ServerOptions {
   endedIdleMs: number;
   clientIdleMs: number;
   quickAutoStartMs: number;
+  /** レート戦で人間の相手が見つからないとき CPU と当てるまでの時間（ms, 範囲内でランダム） */
+  rankedBotAfterMs: [number, number];
   log: (...a: unknown[]) => void;
 }
 
@@ -55,6 +71,7 @@ export const DEFAULT_OPTIONS: ServerOptions = {
   endedIdleMs: 5 * 60_000,
   clientIdleMs: 45_000,
   quickAutoStartMs: 3_000,
+  rankedBotAfterMs: [...RATING.botAfterMs] as [number, number],
   log: () => undefined,
 };
 
@@ -81,6 +98,13 @@ interface Client {
   violations: number;
   failedJoins: number[];
   lastSeq: number;
+  account: AccountRecord | null;
+  skin: string;
+  guestCreated: boolean;
+  rankedSince: number;
+  botAt: number;
+  /** レート戦の CPU（サーバー内で動く。人間と同じように見せる） */
+  bot: { brain: CpuBrain; rating: number } | null;
 }
 
 interface Room {
@@ -98,6 +122,7 @@ interface Room {
   events: MatchEvent[];
   sentRev: [number, number];
   endSent: boolean;
+  ranked: boolean;
 }
 
 let idSeq = 0;
@@ -108,15 +133,19 @@ export class GameServer {
   tokens = new Map<string, Client>();
   rooms = new Map<string, Room>();
   queue: Client[] = [];
+  rankedQueue: Client[] = [];
 
-  constructor(opts: Partial<ServerOptions> = {}) {
+  constructor(
+    opts: Partial<ServerOptions> = {},
+    public accounts: AccountService | null = null,
+  ) {
     this.opts = { ...DEFAULT_OPTIONS, ...opts };
   }
 
   get stats() {
     let playing = 0;
     for (const r of this.rooms.values()) if (r.state === 'playing') playing++;
-    return { clients: this.clients.size, rooms: this.rooms.size, playing, queue: this.queue.length };
+    return { clients: this.clients.size, rooms: this.rooms.size, playing, queue: this.queue.length, ranked: this.rankedQueue.length, accounts: this.accounts?.store.size() ?? 0 };
   }
 
   /* ---------------- 接続 ---------------- */
@@ -143,6 +172,12 @@ export class GameServer {
       violations: 0,
       failedJoins: [],
       lastSeq: -1,
+      account: null,
+      skin: DEFAULT_SKIN,
+      guestCreated: false,
+      rankedSince: 0,
+      botAt: 0,
+      bot: null,
     };
     this.clients.set(c.id, c);
     this.tokens.set(c.token, c);
@@ -203,9 +238,13 @@ export class GameServer {
         this.sendTo(c, { t: 'pong', ts: m.ts, server: now });
         return;
       case 'hello':
-        return this.hello(c, m.name, m.horn);
+        return this.hello(c, m.name, m.horn, m.skin);
       case 'resume':
         return this.resume(c, m.token, now);
+      case 'auth':
+        return void this.auth(c, m.rid, m.method, m.token, m.link, now);
+      case 'acct':
+        return void this.acct(c, m.rid, m, now);
     }
     if (!c.horn) return this.err(c, 'no_hello', 'hello first');
     switch (m.t) {
@@ -216,6 +255,19 @@ export class GameServer {
           this.queue.push(c);
           this.sendTo(c, { t: 'queued' });
           this.matchmake(now);
+        }
+        return;
+      case 'ranked':
+        if (c.room) return this.err(c, 'already_in_room', 'leave first');
+        if (this.accounts && !c.account) return this.err(c, 'no_auth', 'sign in first');
+        if (!c.queued) {
+          c.queued = true;
+          c.rankedSince = now;
+          const [lo, hi] = this.opts.rankedBotAfterMs;
+          c.botAt = now + lo + Math.random() * Math.max(0, hi - lo);
+          this.rankedQueue.push(c);
+          this.sendTo(c, { t: 'queued' });
+          this.matchmakeRanked(now);
         }
         return;
       case 'cancel':
@@ -269,7 +321,7 @@ export class GameServer {
       }
       case 'rematch': {
         const r = c.room;
-        if (!r || r.state !== 'ended') return;
+        if (!r || r.state !== 'ended' || r.ranked) return;
         r.rematch[c.slot] = true;
         r.lastActive = now;
         this.broadcast(r, { t: 'rematch', votes: [...r.rematch] as [boolean, boolean] });
@@ -284,8 +336,16 @@ export class GameServer {
     }
   }
 
-  private hello(c: Client, name: string, horn: HornData) {
+  private hello(c: Client, name: string, horn: HornData, skin?: string) {
     if (!isOnlineAllowed(horn.material)) return this.err(c, 'banned_material', `material ${horn.material} is not allowed online`);
+    if (this.accounts) {
+      // 課金・エメラルドで解放するものはサーバーが持ち主か確認する
+      if (!c.account) return this.err(c, 'no_auth', 'sign in first');
+      if (!ownsMaterial(c.account, horn.material)) return this.err(c, 'locked_material', `material ${horn.material} is locked`);
+      c.skin = skin && this.accounts.ownsSkin(c.account, skin) ? skin : DEFAULT_SKIN;
+    } else {
+      c.skin = skin ?? DEFAULT_SKIN;
+    }
     // 角はサーバーで改めてクリーンアップし、HP を材質と形状から計算する（クライアント申告値は使わない）
     const out = processOutline([horn.vertices]);
     if (!out.ok) return this.err(c, 'invalid_horn', out.error ?? 'invalid');
@@ -313,6 +373,7 @@ export class GameServer {
     old.lastSeen = now;
     old.disconnectedAt = null;
     old.msgBucket = c.msgBucket;
+    if (c.account && !old.account) old.account = c.account;
     c.conn = null;
     this.clients.delete(c.id);
     this.tokens.delete(c.token);
@@ -334,7 +395,7 @@ export class GameServer {
 
   /* ---------------- ルーム ---------------- */
 
-  private newRoom(quick: boolean, now: number): Room {
+  private newRoom(quick: boolean, now: number, ranked = false): Room {
     let code = makeRoomCode();
     while (this.rooms.has(code)) code = makeRoomCode();
     const r: Room = {
@@ -352,6 +413,7 @@ export class GameServer {
       events: [],
       sentRev: [0, 0],
       endSent: false,
+      ranked,
     };
     this.rooms.set(code, r);
     return r;
@@ -398,6 +460,7 @@ export class GameServer {
     if (!c.queued) return;
     c.queued = false;
     this.queue = this.queue.filter((q) => q !== c);
+    this.rankedQueue = this.rankedQueue.filter((q) => q !== c);
   }
 
   private matchmake(now: number) {
@@ -418,7 +481,16 @@ export class GameServer {
   private publicPlayers(r: Room): (PublicPlayer | null)[] {
     return r.players.map((p, i) =>
       p && p.horn
-        ? { name: p.name, material: p.horn.material, polygon: p.horn.polygon, maxHp: p.horn.maxHp, ready: r.ready[i], connected: !!p.conn }
+        ? {
+            name: p.name,
+            material: p.horn.material,
+            polygon: p.horn.polygon,
+            maxHp: p.horn.maxHp,
+            ready: r.ready[i],
+            connected: !!p.conn,
+            skin: p.skin,
+            rating: r.ranked ? Math.round(p.bot ? p.bot.rating : (p.account?.rating ?? RATING.initial)) : undefined,
+          }
         : null,
     );
   }
@@ -427,7 +499,7 @@ export class GameServer {
     const players = this.publicPlayers(r);
     for (const i of [0, 1] as const) {
       const p = r.players[i];
-      if (p) this.sendTo(p, { t: 'room', code: r.code, you: i, players, state: r.state, quick: r.quick });
+      if (p) this.sendTo(p, { t: 'room', code: r.code, you: i, players, state: r.state, quick: r.quick, ranked: r.ranked });
     }
   }
 
@@ -468,6 +540,7 @@ export class GameServer {
       time: m.result.time,
       stats: m.fighters.map((f) => ({ ...f.stats })),
     });
+    if (r.ranked) this.applyRanked(r, m.result.winner);
     r.state = 'ended';
     r.lastActive = Date.now();
   }
@@ -476,6 +549,7 @@ export class GameServer {
 
   /** 60Hz 程度で呼ぶ。dt は秒 */
   tick(dt: number, now = Date.now()) {
+    if (this.rankedQueue.length) this.matchmakeRanked(now);
     for (const r of [...this.rooms.values()]) {
       if (r.state === 'lobby') {
         if (r.autoStartAt && now >= r.autoStartAt && r.players[0]?.conn && r.players[1]?.conn) this.startMatch(r, now);
@@ -503,6 +577,12 @@ export class GameServer {
       }
       if (r.state !== 'playing') continue;
       m.paused = paused;
+      if (!paused) {
+        for (const i of [0, 1] as const) {
+          const b = r.players[i]?.bot;
+          if (b) m.setInput(i, b.brain.update(m, i, dt * m.timeScale));
+        }
+      }
       m.update(dt);
       r.events.push(...m.drainEvents());
       for (const i of [0, 1] as const) {
@@ -529,6 +609,175 @@ export class GameServer {
       } else if (!c.conn && c.disconnectedAt !== null && now - c.disconnectedAt > this.opts.reconnectGrace && (!c.room || c.room.state !== 'playing')) {
         this.removeClient(c);
       }
+    }
+  }
+
+  /* ---------------- アカウント ---------------- */
+
+  private async auth(c: Client, rid: number, method: string, token: string | undefined, link: string | undefined, now: number) {
+    const acc = this.accounts;
+    if (!acc) return this.sendTo(c, { t: 'acct', rid, ok: false, error: 'accounts_unavailable' });
+    try {
+      let rec: AccountRecord;
+      let session: string | undefined;
+      if (method === 'guest') {
+        if (c.guestCreated) throw new AcctError('rate_limited');
+        c.guestCreated = true;
+        ({ rec, session } = acc.createGuest(now));
+      } else if (method === 'session') {
+        rec = acc.bySession(token!, now);
+      } else {
+        ({ rec, session } = await acc.signIn(method as 'apple' | 'google', token!, link, now));
+      }
+      if (!c.conn) return;
+      c.account = rec;
+      const bonus = acc.dailyBonus(rec, now);
+      this.sendTo(c, { t: 'acct', rid, ok: true, profile: acc.profile(rec), session, bonus: bonus || undefined });
+    } catch (e) {
+      this.sendTo(c, { t: 'acct', rid, ok: false, error: e instanceof AcctError ? e.code : 'internal' });
+      if (!(e instanceof AcctError)) this.opts.log('auth error', e);
+    }
+  }
+
+  private async acct(c: Client, rid: number, op: AcctOp, now: number) {
+    const acc = this.accounts;
+    if (!acc) return this.sendTo(c, { t: 'acct', rid, ok: false, error: 'accounts_unavailable' });
+    const rec = c.account;
+    if (!rec) return this.sendTo(c, { t: 'acct', rid, ok: false, error: 'no_auth' });
+    try {
+      let granted: string[] | undefined;
+      switch (op.op) {
+        case 'profile':
+          break;
+        case 'buyMaterial':
+          acc.buyMaterial(rec, op.material, now);
+          break;
+        case 'buySkin':
+          acc.buySkin(rec, op.skin, now);
+          break;
+        case 'equipSkin':
+          acc.equipSkin(rec, op.skin);
+          break;
+        case 'saveHorn':
+          acc.saveHorn(rec, op.slot, op.horn, now);
+          break;
+        case 'deleteHorn':
+          acc.deleteHorn(rec, op.slot);
+          break;
+        case 'setName':
+          acc.setName(rec, op.name);
+          break;
+        case 'syncPurchases':
+          granted = await acc.syncPurchases(rec, now);
+          break;
+        case 'testPurchase':
+          granted = acc.testPurchase(rec, op.product, now);
+          break;
+      }
+      this.sendTo(c, { t: 'acct', rid, ok: true, profile: acc.profile(rec), granted });
+    } catch (e) {
+      this.sendTo(c, { t: 'acct', rid, ok: false, error: e instanceof AcctError ? e.code : 'internal', profile: acc.profile(rec) });
+      if (!(e instanceof AcctError)) this.opts.log('acct error', e);
+    }
+  }
+
+  /* ---------------- レート戦 ---------------- */
+
+  private ratingOf(c: Client): number {
+    return c.bot ? c.bot.rating : (c.account?.rating ?? RATING.initial);
+  }
+
+  private matchmakeRanked(now: number) {
+    this.rankedQueue = this.rankedQueue.filter((q) => q.conn && q.queued && !q.room);
+    const q = this.rankedQueue;
+    // レートの近い人どうし。待つほど許容差が広がる
+    for (let i = 0; i < q.length; i++) {
+      const a = q[i];
+      const wa = RATING.baseWindow + (RATING.windowPerSec * (now - a.rankedSince)) / 1000;
+      let best = -1;
+      let bestDiff = Infinity;
+      for (let j = i + 1; j < q.length; j++) {
+        const b = q[j];
+        const wb = RATING.baseWindow + (RATING.windowPerSec * (now - b.rankedSince)) / 1000;
+        const d = Math.abs(this.ratingOf(a) - this.ratingOf(b));
+        if (d <= Math.max(wa, wb) && d < bestDiff && a.account?.id !== b.account?.id) {
+          best = j;
+          bestDiff = d;
+        }
+      }
+      if (best >= 0 && this.rooms.size < this.opts.maxRooms) {
+        const b = q[best];
+        q.splice(best, 1);
+        q.splice(i, 1);
+        i--;
+        a.queued = b.queued = false;
+        const r = this.newRoom(true, now, true);
+        this.seat(r, a, 0);
+        this.seat(r, b, 1);
+        r.autoStartAt = now + this.opts.quickAutoStartMs;
+        this.broadcastRoom(r);
+      }
+    }
+    // 見つからないまま時間が来たら CPU と当てる
+    for (const a of [...this.rankedQueue]) {
+      if (now < a.botAt || this.rooms.size >= this.opts.maxRooms) continue;
+      this.rankedQueue = this.rankedQueue.filter((x) => x !== a);
+      a.queued = false;
+      const bot = this.makeBot(this.ratingOf(a));
+      const r = this.newRoom(true, now, true);
+      const slot = Math.random() < 0.5 ? 0 : 1;
+      this.seat(r, a, slot);
+      this.seat(r, bot, (1 - slot) as 0 | 1);
+      r.autoStartAt = now + this.opts.quickAutoStartMs;
+      this.broadcastRoom(r);
+    }
+  }
+
+  private makeBot(nearRating: number): Client {
+    const rnd = <T>(arr: readonly T[]) => arr[Math.floor(Math.random() * arr.length)];
+    const rating = Math.max(RATING.min, Math.round(nearRating + (Math.random() - 0.5) * 120));
+    const difficulty: Difficulty = rating < 1350 ? 'easy' : rating < 1650 ? 'normal' : 'hard';
+    const tpl = rnd(HORN_TEMPLATES);
+    const out = processOutline(templateStrokes(tpl.id));
+    const material = rnd(MATERIAL_IDS.filter((m) => isOnlineAllowed(m)));
+    const polygon = out.polygon;
+    const maxHp = computeMaxHP(MATERIALS[material], buildHornModel(polygon).stats);
+    const noop: Conn = { send: () => undefined, close: () => undefined };
+    return {
+      id: `b${(++idSeq).toString(36)}`,
+      token: makeToken(),
+      conn: noop,
+      name: rnd(BOT_NAMES),
+      horn: { name: tpl.name, polygon, material, maxHp },
+      room: null,
+      slot: 1,
+      queued: false,
+      lastSeen: Date.now(),
+      disconnectedAt: null,
+      msgBucket: new TokenBucket(1, 1, Date.now()),
+      inputBucket: new TokenBucket(1, 1, Date.now()),
+      violations: 0,
+      failedJoins: [],
+      lastSeq: -1,
+      account: null,
+      skin: rnd(SKIN_IDS),
+      guestCreated: true,
+      rankedSince: 0,
+      botAt: 0,
+      bot: { brain: new CpuBrain(difficulty, (Math.random() * 1e9) | 0), rating },
+    };
+  }
+
+  private applyRanked(r: Room, winner: 0 | 1 | null) {
+    const ratings = r.players.map((p) => (p ? this.ratingOf(p) : RATING.initial));
+    for (const i of [0, 1] as const) {
+      const p = r.players[i];
+      if (!p || p.bot || !p.account || !this.accounts) continue;
+      const score: 0 | 0.5 | 1 = winner === null ? 0.5 : winner === i ? 1 : 0;
+      const before = p.account.rating;
+      const delta = eloDelta(before, ratings[1 - i], score);
+      this.accounts.applyRating(p.account, delta, score);
+      this.sendTo(p, { t: 'rating', before, after: p.account.rating, delta: p.account.rating - before });
     }
   }
 

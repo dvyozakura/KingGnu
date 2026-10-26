@@ -26,8 +26,8 @@ export interface BattleSource {
 }
 
 export interface LocalSetup {
-  player: { polygon: Poly; material: MaterialId; name: string };
-  cpu: { polygon: Poly; material: MaterialId; name: string };
+  player: { polygon: Poly; material: MaterialId; name: string; skin?: string };
+  cpu: { polygon: Poly; material: MaterialId; name: string; skin?: string };
   difficulty: Difficulty;
 }
 
@@ -54,7 +54,10 @@ export class LocalSource implements BattleSource {
   }
 
   view() {
-    return viewFromMatch(this.match);
+    const v = viewFromMatch(this.match);
+    v.fighters[0].skin = this.setup.player.skin;
+    v.fighters[1].skin = this.setup.cpu.skin;
+    return v;
   }
 
   drainEvents() {

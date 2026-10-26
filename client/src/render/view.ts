@@ -31,6 +31,8 @@ export interface FighterView {
   cracks: CrackMark[];
   /** 炎で燃えている残り時間 */
   burn: number;
+  /** 牛のスキン（見た目だけ） */
+  skin?: string;
 }
 
 export interface MatchView {

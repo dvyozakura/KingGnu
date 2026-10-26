@@ -4,15 +4,22 @@ import { HornPreview } from '../components/HornPreview';
 import { isMuted, setMuted, sfx, unlockAudio } from '../game/audio';
 import { processOutline, templateStrokes } from '@kinggnu/shared';
 import { Guide } from './Guide';
+import { useAccount } from '../account/session';
+import { AccountPanel } from '../components/AccountOverlays';
+import { Emeralds } from '../components/Emerald';
 
 interface Props {
   onCpu: () => void;
   onOnline: () => void;
+  onShop: () => void;
+  onSkins: () => void;
 }
 
 const demo = processOutline(templateStrokes('whip')).polygon;
 
-export function Title({ onCpu, onOnline }: Props) {
+export function Title({ onCpu, onOnline, onShop, onSkins }: Props) {
+  const { profile, status } = useAccount();
+  const [acct, setAcct] = useState(false);
   const [help, setHelp] = useState(false);
   const [guide, setGuide] = useState(false);
   const [mute, setMute] = useState(isMuted());
@@ -23,14 +30,26 @@ export function Title({ onCpu, onOnline }: Props) {
   };
   return (
     <div className="screen title">
+      <div className="title-top">
+        <button className="ghost small acct-btn" onClick={go(() => setAcct(true))}>
+          <span className={`dot ${status}`} />
+          {profile ? `レート ${profile.rating}` : 'アカウント'}
+        </button>
+        <button className="ghost small" onClick={go(onSkins)}>
+          🐄 スキン
+        </button>
+        <button className="ghost small gem-btn" onClick={go(onShop)}>
+          <Emeralds n={profile?.emeralds ?? '-'} /> <span className="plus">＋</span>
+        </button>
+      </div>
       <div className="title-wrap">
         <div className="logo">
           <span className="logo-king">KING</span>
-          <span className="logo-gnu">GNU</span>
+          <span className="logo-gnu">HORN</span>
         </div>
         <p className="tagline">自分で描いた角で殴り合え。</p>
         <div className="title-demo">
-          <HornPreview polygon={demo} material="rubber" width={280} height={190} animate showBody />
+          <HornPreview polygon={demo} material="rubber" width={280} height={190} animate showBody skin={profile?.skin} />
         </div>
         <div className="btn-col">
           <button className="primary big" onClick={go(onCpu)}>
@@ -102,6 +121,7 @@ export function Title({ onCpu, onOnline }: Props) {
         </div>
       )}
       {guide && <Guide onClose={() => setGuide(false)} />}
+      {acct && <AccountPanel onClose={() => setAcct(false)} />}
     </div>
   );
 }

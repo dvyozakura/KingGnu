@@ -41,7 +41,7 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === '/health') return new Response(JSON.stringify({ ok: true, name: 'kinggnu-worker' }), { headers: { 'content-type': 'application/json' } });
-    if (url.pathname !== '/ws') return new Response('KingGnu server', { status: 200 });
+    if (url.pathname !== '/ws') return new Response('King Horn server', { status: 200 });
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
     if (!allowed(req.headers.get('Origin'), env)) return new Response('origin not allowed', { status: 403 });
     const stub = env.GAME.get(env.GAME.idFromName('global'));

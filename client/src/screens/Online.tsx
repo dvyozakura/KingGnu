@@ -19,6 +19,8 @@ import { loadNickname, saveNickname } from '../game/storage';
 import { DEFAULT_SERVER_URL, NetClient, defaultServerUrl, saveServerUrl } from '../net/client';
 import { OnlineSource } from '../net/onlineSource';
 import { Battle } from './Battle';
+import { account, accountErrorText, useAccount } from '../account/session';
+import { afterMatchAd } from '../account/ads';
 import { Result } from './Result';
 
 interface Props {
@@ -34,6 +36,7 @@ interface RoomInfo {
   you: 0 | 1;
   players: (PublicPlayer | null)[];
   quick: boolean;
+  ranked: boolean;
 }
 
 const ERRORS: Record<string, string> = {
@@ -49,6 +52,8 @@ const ERRORS: Record<string, string> = {
   version: 'クライアントのバージョンが古いです。再読み込みしてください',
   no_hello: 'もう一度ボタンを押してください',
   already_in_room: 'すでにルームに入っています',
+  locked_material: 'この材質はまだ解放されていません（ショップで解放できます）',
+  no_auth: 'アカウントに接続できません。少し待ってからもう一度お試しください',
 };
 
 export function Online({ horn, onBack, onEditHorn }: Props) {
@@ -66,6 +71,8 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
   const [banner, setBanner] = useState('');
   const [warn, setWarn] = useState<string[]>([]);
   const [rtt, setRtt] = useState(0);
+  const [rating, setRating] = useState<{ before: number; after: number; delta: number } | null>(null);
+  const { profile, status: acctStatus } = useAccount();
   const clientRef = useRef<NetClient | null>(null);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -98,7 +105,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
         setPhase('queue');
         break;
       case 'room':
-        setRoom({ code: m.code, you: m.you, players: m.players, quick: m.quick });
+        setRoom({ code: m.code, you: m.you, players: m.players, quick: m.quick, ranked: !!m.ranked });
         if (phaseRef.current !== 'battle' && phaseRef.current !== 'result') setPhase('room');
         if (m.state === 'lobby') setReady(!!m.players[m.you]?.ready);
         break;
@@ -111,11 +118,15 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
         setVotes([false, false]);
         setBanner('');
         setResult(null);
+        setRating(null);
         setPhase('battle');
         break;
       }
       case 'rematch':
         setVotes(m.votes);
+        break;
+      case 'rating':
+        setRating({ before: m.before, after: m.after, delta: m.delta });
         break;
       case 'opp':
         if (m.status === 'disconnected') setBanner('相手の接続が切れました。再接続を待っています…');
@@ -151,6 +162,9 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
       });
       await cl.connect();
     }
+    // 対戦用の接続も同じアカウントでログイン（材質・スキンの所持はサーバーが確認する）
+    const auth = await account.authorize(cl);
+    if (!auth.ok) throw new Error(auth.error === 'no_auth' ? ERRORS.no_auth : accountErrorText(auth.error));
     // 毎回名乗り直す（サーバー再起動などで名乗りが失われていても確実に通るように）
     const welcome = new Promise<void>((resolve, reject) => {
       const off = cl.on((m) => {
@@ -170,13 +184,14 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
       v: PROTOCOL_VERSION,
       name: name.trim() || 'Guest',
       horn: makeHornData(horn.name, horn.material, horn.polygon),
+      skin: account.state.profile?.skin,
     });
     await welcome;
     cl.resumable = true;
     return cl;
   };
 
-  const act = async (msg: 'quick' | 'create' | 'join') => {
+  const act = async (msg: 'quick' | 'create' | 'join' | 'ranked') => {
     unlockAudio();
     sfx.click();
     setError('');
@@ -218,6 +233,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
         onEnd={(r) => {
           setResult(r);
           setPhase('result');
+          void afterMatchAd();
         }}
         onQuit={leaveRoom}
       />
@@ -227,6 +243,27 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
   if (phase === 'result' && result && room) {
     const you = result.you;
     const oppGone = !room.players[1 - you] || error === '相手が退出しました';
+    if (room.ranked)
+      return (
+        <Result
+          result={result}
+          note={rating ? `レート ${rating.before} → ${rating.after}（${rating.delta >= 0 ? '+' : ''}${rating.delta}）` : 'レート戦'}
+          actions={[
+            {
+              label: 'もう一度レート戦',
+              primary: true,
+              onClick: () => {
+                clientRef.current?.send({ t: 'leave' });
+                setRoom(null);
+                setPhase('queue');
+                clientRef.current?.send({ t: 'ranked' });
+              },
+            },
+            { label: 'ロビーに戻る', onClick: leaveRoom },
+            { label: 'タイトルへ', onClick: onBack },
+          ]}
+        />
+      );
     return (
       <Result
         result={result}
@@ -284,7 +321,10 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
               ニックネーム
               <input value={name} maxLength={16} onChange={(e) => setName(e.target.value)} placeholder="なまえ（16文字まで）" />
             </label>
-            <button className="primary big" disabled={phase === 'connecting'} onClick={() => act('quick')}>
+            <button className="primary big" disabled={phase === 'connecting' || acctStatus !== 'online'} onClick={() => act('ranked')}>
+              RANKED MATCH <small>レート戦{profile ? `（レート ${profile.rating}）` : ''}</small>
+            </button>
+            <button className="big" disabled={phase === 'connecting'} onClick={() => act('quick')}>
               QUICK MATCH <small>ランダム対戦</small>
             </button>
             <button className="big" disabled={phase === 'connecting'} onClick={() => act('create')}>
@@ -335,7 +375,7 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
                 </button>
               </div>
             )}
-            {room.quick && <h3>マッチング成立！</h3>}
+            {room.quick && <h3>{room.ranked ? 'レート戦 マッチング成立！' : 'マッチング成立！'}</h3>}
             <div className="vs">
               {[0, 1].map((i) => {
                 const p = room.players[i];
@@ -343,15 +383,16 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
                   <div key={i} className={`slot ${i === room.you ? 'you' : ''}`}>
                     {p ? (
                       <>
-                        <HornPreview polygon={p.polygon} material={p.material} fluid aspect={0.75} />
+                        <HornPreview polygon={p.polygon} material={p.material} fluid aspect={0.75} showBody skin={p.skin} />
                         <div className="pname">
                           {p.name}
                           {i === room.you ? '（あなた）' : ''}
                         </div>
                         <div className="muted">
                           {MATERIALS[p.material].name} / HP {p.maxHp}
+                          {room.ranked && p.rating !== undefined ? ` / レート ${p.rating}` : ''}
                         </div>
-                        <div className={`ready ${p.ready ? 'on' : ''}`}>{p.ready ? 'READY!' : '準備中'}</div>
+                        {!room.quick && <div className={`ready ${p.ready ? 'on' : ''}`}>{p.ready ? 'READY!' : '準備中'}</div>}
                       </>
                     ) : (
                       <div className="empty">
@@ -363,17 +404,23 @@ export function Online({ horn, onBack, onEditHorn }: Props) {
                 );
               })}
             </div>
-            <button
-              className="primary big ready-btn"
-              disabled={!room.players[0] || !room.players[1]}
-              onClick={() => {
-                sfx.click();
-                clientRef.current?.send({ t: 'ready', ready: !ready });
-              }}
-            >
-              {ready ? '準備完了を取り消す' : '準備完了！'}
-            </button>
-            <p className="hint">両者が準備完了すると3秒のカウントダウンで開始します。</p>
+            {room.quick ? (
+              <p className="hint">まもなく試合が始まります…</p>
+            ) : (
+              <>
+                <button
+                  className="primary big ready-btn"
+                  disabled={!room.players[0] || !room.players[1]}
+                  onClick={() => {
+                    sfx.click();
+                    clientRef.current?.send({ t: 'ready', ready: !ready });
+                  }}
+                >
+                  {ready ? '準備完了を取り消す' : '準備完了！'}
+                </button>
+                <p className="hint">両者が準備完了すると3秒のカウントダウンで開始します。</p>
+              </>
+            )}
           </div>
         )}
         {error && <div className="toast warn static">{error}</div>}

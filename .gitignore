@@ -12,3 +12,15 @@ coverage/
 # 公開URLのみ（秘密情報なし）
 !client/.env.production
 server/logs/
+
+# アカウント・課金データ（自宅サーバー上だけに置く。絶対にコミットしない）
+server/data/
+# サーバーの秘密情報（RevenueCat のシークレットキーなど）
+server/.env.local
+
+# モバイル
+mobile/node_modules/
+mobile/www/
+# ネイティブプロジェクト（GitHub Actions で毎回生成。手元で Android Studio / Xcode を使うようになったら外してコミットする）
+mobile/android/
+mobile/ios/

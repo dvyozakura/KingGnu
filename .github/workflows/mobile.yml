@@ -1,0 +1,83 @@
+# King Horn アプリ版のビルド（手動実行）。
+#  - Android: デバッグ版 APK を作ってダウンロードできるようにする（Android 実機に入れて試せる）
+#  - iOS    : Mac 環境でシミュレータ向けにビルドが通るか確認する（署名なし。App Store 配信には Apple Developer Program が必要）
+# 公開キー類はリポジトリの Settings → Secrets and variables → Actions → Variables に登録する（README 参照）。
+name: Mobile build
+
+on:
+  workflow_dispatch:
+
+env:
+  VITE_REVENUECAT_IOS_KEY: ${{ vars.VITE_REVENUECAT_IOS_KEY }}
+  VITE_REVENUECAT_ANDROID_KEY: ${{ vars.VITE_REVENUECAT_ANDROID_KEY }}
+  VITE_ADMOB_INTERSTITIAL_IOS: ${{ vars.VITE_ADMOB_INTERSTITIAL_IOS }}
+  VITE_ADMOB_INTERSTITIAL_ANDROID: ${{ vars.VITE_ADMOB_INTERSTITIAL_ANDROID }}
+  VITE_GOOGLE_WEB_CLIENT_ID: ${{ vars.VITE_GOOGLE_WEB_CLIENT_ID }}
+  VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.VITE_GOOGLE_IOS_CLIENT_ID }}
+  ADMOB_APP_ID_IOS: ${{ vars.ADMOB_APP_ID_IOS }}
+  ADMOB_APP_ID_ANDROID: ${{ vars.ADMOB_APP_ID_ANDROID }}
+  GOOGLE_IOS_CLIENT_ID: ${{ vars.VITE_GOOGLE_IOS_CLIENT_ID }}
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install (web)
+        run: npm install --no-audit --no-fund
+      - name: Install (mobile)
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+      - name: Typecheck native bridge
+        run: npx tsc -p mobile
+      - name: Build web assets
+        working-directory: mobile
+        run: npm run build:web
+      - name: Create / sync Android project
+        working-directory: mobile
+        run: |
+          if [ ! -d android ]; then npx cap add android; fi
+          npm run configure
+          npx cap sync android
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kinghorn-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/*.apk
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install (web)
+        run: npm install --no-audit --no-fund
+      - name: Install (mobile)
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+      - name: Build web assets
+        working-directory: mobile
+        run: npm run build:web
+      - name: Create / sync iOS project
+        working-directory: mobile
+        run: |
+          if [ ! -d ios ]; then npx cap add ios; fi
+          npm run configure
+          npx cap sync ios
+      - name: Build for simulator (unsigned)
+        working-directory: mobile/ios/App
+        run: |
+          if [ -d App.xcworkspace ]; then TARGET="-workspace App.xcworkspace"; else TARGET="-project App.xcodeproj"; fi
+          xcodebuild $TARGET -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build | tail -n 50
+          exit ${PIPESTATUS[0]}

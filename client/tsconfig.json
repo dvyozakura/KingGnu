@@ -1,10 +1,23 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
-    "types": ["vite/client"],
-    "noEmit": true
+    "types": [
+      "vite/client"
+    ],
+    "noEmit": true,
+    "paths": {
+      "@native-bridge": [
+        "./src/native/web.ts"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

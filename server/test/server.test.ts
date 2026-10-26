@@ -8,6 +8,24 @@ import { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { HORN_TEMPLATES, MATERIAL_IDS, MAX_PACKET_BYTES, MaterialId, PROTOCOL_VERSION, ServerMsg, makeHornData, processOutline, templateStrokes } from '@kinggnu/shared';
 import { Client, GameServer } from '../src/core/gameServer';
+import { AccountService } from '../src/core/accounts';
+import { IdTokenVerifier, type FetchJson } from '../src/core/auth';
+import { StoreTransaction } from '../src/core/iap';
+import { MemoryAccountStore } from '../src/core/store';
+import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+
+/* テスト用の「Appleの鍵」と「ストアの購入履歴」 */
+export const appleKeys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const appleJwk = { ...(appleKeys.publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid: 'test-kid', alg: 'RS256', use: 'sig' };
+const fakeFetch: FetchJson = async (u) => ({ ok: true, status: 200, json: async () => (u.includes('apple') ? { keys: [appleJwk] } : { keys: [] }) });
+export const storeTx: StoreTransaction[] = [];
+export function appleToken(sub: string, opts: { aud?: string; exp?: number; key?: typeof appleKeys.privateKey } = {}) {
+  const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const head = enc({ alg: 'RS256', kid: 'test-kid' });
+  const body = enc({ iss: 'https://appleid.apple.com', aud: opts.aud ?? 'jp.yein.kinghorn', sub, iat: Math.floor(Date.now() / 1000), exp: opts.exp ?? Math.floor(Date.now() / 1000) + 600 });
+  const sig = cryptoSign('RSA-SHA256', Buffer.from(`${head}.${body}`), opts.key ?? appleKeys.privateKey).toString('base64url');
+  return `${head}.${body}.${sig}`;
+}
 
 let http: Server;
 let wss: WebSocketServer;
@@ -16,7 +34,11 @@ let url = '';
 let loop: ReturnType<typeof setInterval>;
 
 before(async () => {
-  game = new GameServer({ reconnectGrace: 1500, quickAutoStartMs: 200 });
+  const accounts = new AccountService(new MemoryAccountStore(), new IdTokenVerifier(fakeFetch), { transactions: async () => [...storeTx] }, {
+    appleAudiences: ['jp.yein.kinghorn'],
+    allowTestPurchases: true,
+  });
+  game = new GameServer({ reconnectGrace: 1500, quickAutoStartMs: 200, rankedBotAfterMs: [400, 400] }, accounts);
   http = createServer();
   wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: MAX_PACKET_BYTES });
   const byWs = new Map<WebSocket, Client>();
@@ -52,8 +74,12 @@ after(async () => {
   await new Promise<void>((r) => http.close(() => r()));
 });
 
+let ridSeq = 1;
+
 class TestClient {
   ws: WebSocket;
+  session = '';
+  accountId = '';
   msgs: ServerMsg[] = [];
   waiters: { pred: (m: ServerMsg) => boolean; res: (m: ServerMsg) => void }[] = [];
   constructor(public name: string) {
@@ -90,7 +116,25 @@ class TestClient {
       });
     });
   }
+  async rpc(o: Record<string, unknown>) {
+    const rid = ridSeq++;
+    this.send({ ...o, rid });
+    return this.wait('acct', (m) => m.rid === rid);
+  }
+  /** ゲストでログイン。unlockAll なら全材質を解放した状態にする（対戦テスト用） */
+  async auth(unlockAll = true) {
+    const r = this.session ? await this.rpc({ t: 'auth', method: 'session', token: this.session }) : await this.rpc({ t: 'auth', method: 'guest' });
+    assert.ok(r.ok, r.error ?? "");
+    if (r.session) this.session = r.session;
+    this.accountId = r.profile!.id;
+    if (unlockAll) {
+      const rec = game.accounts!.store.get(this.accountId)!;
+      rec.materials = [...MATERIAL_IDS];
+    }
+    return r;
+  }
   async hello(tpl = 'classic', material: MaterialId = 'plastic', extra: Record<string, unknown> = {}) {
+    if (!this.accountId) await this.auth();
     const poly = processOutline(templateStrokes(tpl)).polygon;
     this.send({ t: 'hello', v: PROTOCOL_VERSION, name: this.name, horn: { ...makeHornData(this.name, material, poly), ...extra } });
   }
@@ -261,5 +305,240 @@ test('全材質（ゴム含む）がオンラインで受理される', async ()
     const w = await c.wait('welcome');
     assert.equal(w.horn.material, m);
   }
+  c.close();
+});
+
+/* ---------------- アカウント・経済 ---------------- */
+
+test('ゲスト登録：初期状態・ログボは1日1回・同じセッションで再ログイン', async () => {
+  const c = new TestClient('G');
+  await c.open();
+  const r = await c.auth(false);
+  assert.equal(r.bonus, 10);
+  const p = r.profile!;
+  assert.equal(p.emeralds, 10);
+  assert.deepEqual(p.materials, []);
+  assert.equal(p.slots, 2);
+  assert.equal(p.horns.length, 2);
+  assert.equal(p.skin, 'holstein');
+  assert.equal(p.rating, 1500);
+  c.close();
+  const c2 = new TestClient('G');
+  await c2.open();
+  c2.session = c.session;
+  const r2 = await c2.auth(false);
+  assert.equal(r2.profile!.id, p.id, '同じアカウント');
+  assert.equal(r2.bonus, undefined, '同じ日は2回目のログボなし');
+  assert.equal(r2.profile!.emeralds, 10);
+  // 1接続でゲストを何個も作れない
+  const r3 = await c2.rpc({ t: 'auth', method: 'guest' });
+  assert.equal(r3.ok, true);
+  const r4 = await c2.rpc({ t: 'auth', method: 'guest' });
+  assert.equal(r4.ok, false);
+  // 偽セッション
+  const r5 = await c2.rpc({ t: 'auth', method: 'session', token: 'x'.repeat(32) });
+  assert.equal(r5.error, 'session_invalid');
+  c2.close();
+});
+
+test('材質の解放：エメラルド不足は拒否、解放するとオンラインで使える。未解放はサーバーが拒否', async () => {
+  const c = new TestClient('M');
+  await c.open();
+  await c.auth(false);
+  await c.hello('classic', 'glass');
+  assert.equal((await c.wait('err')).code, 'locked_material');
+  await c.hello('classic', 'rubber');
+  await c.wait('welcome'); // 無料材質
+  // 10 エメラルドでは 20 の材質は買えない
+  let r = await c.rpc({ t: 'acct', op: 'buyMaterial', material: 'fire' });
+  assert.equal(r.error, 'not_enough_emeralds');
+  r = await c.rpc({ t: 'acct', op: 'testPurchase', product: 'kinghorn.emerald100' });
+  assert.ok(r.ok);
+  assert.equal(r.profile!.emeralds, 110);
+  r = await c.rpc({ t: 'acct', op: 'buyMaterial', material: 'fire' });
+  assert.ok(r.ok);
+  assert.equal(r.profile!.emeralds, 90);
+  assert.deepEqual(r.profile!.materials, ['fire']);
+  r = await c.rpc({ t: 'acct', op: 'buyMaterial', material: 'fire' });
+  assert.equal(r.error, 'already_owned');
+  r = await c.rpc({ t: 'acct', op: 'buyMaterial', material: 'plastic' });
+  assert.equal(r.error, 'already_owned', '無料材質は買えない');
+  await c.hello('classic', 'fire');
+  await c.wait('welcome');
+  // クライアントがエメラルド数を偽っても無視（そもそもメッセージに含められない）
+  c.send({ t: 'acct', rid: 999, op: 'buyMaterial', material: 'iron', emeralds: 99999, price: 0 });
+  const r2 = await c.wait('acct', (m) => m.rid === 999);
+  assert.ok(r2.ok);
+  assert.equal(r2.profile!.emeralds, 70);
+  c.close();
+});
+
+test('スキン：購入・装備・未所持は使えない（能力差なし）', async () => {
+  const a = new TestClient('SkinA');
+  const b = new TestClient('SkinB');
+  await Promise.all([a.open(), b.open()]);
+  await a.auth(false);
+  await b.auth(false);
+  let r = await a.rpc({ t: 'acct', op: 'buySkin', skin: 'galaxy' });
+  assert.equal(r.error, 'not_enough_emeralds');
+  await a.rpc({ t: 'acct', op: 'testPurchase', product: 'kinghorn.emerald100' });
+  r = await a.rpc({ t: 'acct', op: 'buySkin', skin: 'galaxy' });
+  assert.ok(r.ok);
+  assert.equal(r.profile!.skin, 'galaxy');
+  assert.equal(r.profile!.emeralds, 10);
+  r = await a.rpc({ t: 'acct', op: 'equipSkin', skin: 'panda' });
+  assert.equal(r.error, 'not_owned');
+  // 対戦相手にはスキンが見える。未所持のスキンを名乗っても既定に戻される
+  const poly = processOutline(templateStrokes('classic')).polygon;
+  a.send({ t: 'hello', v: PROTOCOL_VERSION, name: 'A', horn: makeHornData('A', 'plastic', poly), skin: 'galaxy' });
+  b.send({ t: 'hello', v: PROTOCOL_VERSION, name: 'B', horn: makeHornData('B', 'plastic', poly), skin: 'golden' });
+  await a.wait('welcome');
+  await b.wait('welcome');
+  a.send({ t: 'create' });
+  const room = await a.wait('room');
+  b.send({ t: 'join', code: room.code });
+  const rb = await b.wait('room', (m) => !!m.players[1]);
+  assert.equal(rb.players[0]!.skin, 'galaxy');
+  assert.equal(rb.players[1]!.skin, 'holstein');
+  a.close();
+  b.close();
+});
+
+test('角の保存枠：無料は2つ、360円の拡張で8つ。広告削除フラグ', async () => {
+  const c = new TestClient('Slot');
+  await c.open();
+  await c.auth(false);
+  const horn = makeHornData('H', 'plastic', processOutline(templateStrokes('hook')).polygon);
+  for (const slot of [0, 1]) assert.ok((await c.rpc({ t: 'acct', op: 'saveHorn', slot, horn })).ok);
+  let r = await c.rpc({ t: 'acct', op: 'saveHorn', slot: 2, horn });
+  assert.equal(r.error, 'slot_locked');
+  r = await c.rpc({ t: 'acct', op: 'testPurchase', product: 'kinghorn.slots8' });
+  assert.equal(r.profile!.slots, 8);
+  assert.equal(r.profile!.horns.length, 8);
+  r = await c.rpc({ t: 'acct', op: 'saveHorn', slot: 7, horn });
+  assert.ok(r.ok);
+  assert.equal(r.profile!.horns[7]!.name, 'H');
+  assert.equal(r.profile!.horns.filter(Boolean).length, 3);
+  r = await c.rpc({ t: 'acct', op: 'deleteHorn', slot: 0 });
+  assert.equal(r.profile!.horns[0], null);
+  // 壊れた角は保存できない
+  r = await c.rpc({ t: 'acct', op: 'saveHorn', slot: 1, horn: { ...horn, vertices: [[0, 0], [1, 0], [0, 1]] } });
+  assert.equal(r.ok, false);
+  assert.equal(r.profile?.noAds ?? false, false);
+  r = await c.rpc({ t: 'acct', op: 'testPurchase', product: 'kinghorn.noads' });
+  assert.equal(r.profile!.noAds, true);
+  c.close();
+});
+
+test('ストア購入の取り込み：同じトランザクションは1回だけ付与', async () => {
+  const c = new TestClient('Iap');
+  await c.open();
+  await c.auth(false);
+  storeTx.push({ product: 'kinghorn.emerald100', id: 'T1', sandbox: false, at: 0 }, { product: 'kinghorn.noads', id: 'T2', sandbox: false, at: 0 }, { product: 'unknown.item', id: 'T3', sandbox: false, at: 0 });
+  let r = await c.rpc({ t: 'acct', op: 'syncPurchases' });
+  assert.deepEqual(r.granted?.sort(), ['kinghorn.emerald100', 'kinghorn.noads']);
+  assert.equal(r.profile!.emeralds, 110);
+  assert.equal(r.profile!.noAds, true);
+  r = await c.rpc({ t: 'acct', op: 'syncPurchases' });
+  assert.deepEqual(r.granted, []);
+  assert.equal(r.profile!.emeralds, 110);
+  storeTx.push({ product: 'kinghorn.emerald100', id: 'T4', sandbox: true, at: 0 });
+  r = await c.rpc({ t: 'acct', op: 'syncPurchases' });
+  assert.equal(r.profile!.emeralds, 210);
+  storeTx.length = 0;
+  c.close();
+});
+
+test('Appleでサインイン：ゲストのデータを引き継ぎ、機種変更後も同じアカウント。偽トークンは拒否', async () => {
+  const c = new TestClient('Apple');
+  await c.open();
+  await c.auth(false);
+  await c.rpc({ t: 'acct', op: 'testPurchase', product: 'kinghorn.emerald100' });
+  const r = await c.rpc({ t: 'auth', method: 'apple', token: appleToken('apple-sub-1'), link: c.session });
+  assert.ok(r.ok, r.error ?? "");
+  assert.equal(r.profile!.id, c.accountId, 'ゲストのアカウントに紐づく');
+  assert.deepEqual(r.profile!.providers.sort(), ['apple', 'guest']);
+  assert.equal(r.profile!.emeralds, 110);
+  c.close();
+  // 別の端末（新しい接続・セッションなし）から同じ Apple ID でサインイン
+  const d = new TestClient('Apple2');
+  await d.open();
+  const r2 = await d.rpc({ t: 'auth', method: 'apple', token: appleToken('apple-sub-1') });
+  assert.equal(r2.profile!.id, c.accountId);
+  assert.equal(r2.profile!.emeralds, 110);
+  // 偽造（別の鍵で署名）・宛先違い・期限切れ
+  const other = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  for (const bad of [appleToken('x', { key: other.privateKey }), appleToken('x', { aud: 'com.evil.app' }), appleToken('x', { exp: 1000 })]) {
+    const e = await d.rpc({ t: 'auth', method: 'apple', token: bad });
+    assert.equal(e.error, 'signin_failed');
+  }
+  // Google は未設定
+  const g = await d.rpc({ t: 'auth', method: 'google', token: appleToken('x') });
+  assert.equal(g.error, 'provider_unavailable');
+  d.close();
+});
+
+test('レート戦：相手がいなければCPU（CPUとは表示しない）。決着でレートが変わる', async () => {
+  const c = new TestClient('Ranked');
+  await c.open();
+  await c.hello();
+  await c.wait('welcome');
+  c.send({ t: 'ranked' });
+  await c.wait('queued');
+  const room = await c.wait('room', (m) => !!m.ranked && !!m.players[0] && !!m.players[1], 5000);
+  const opp = room.players[1 - room.you]!;
+  assert.equal(room.quick, true);
+  assert.ok(!/cpu/i.test(opp.name), `CPUと分からない名前: ${opp.name}`);
+  assert.ok(typeof opp.rating === 'number' && Math.abs(opp.rating - 1500) <= 60);
+  assert.equal(opp.connected, true);
+  await c.wait('start');
+  // 試合を放棄 → 負け扱いでレートが下がる
+  c.send({ t: 'leave' });
+  const rt = await c.wait('rating');
+  assert.ok(rt.delta < 0);
+  assert.equal(rt.after, rt.before + rt.delta);
+  const p = await c.rpc({ t: 'acct', op: 'profile' });
+  assert.equal(p.profile!.rating, rt.after);
+  assert.equal(p.profile!.ranked.losses, 1);
+  c.close();
+});
+
+test('レート戦：人間どうしが待っていれば人間と当たる', async () => {
+  const a = new TestClient('RA');
+  const b = new TestClient('RB');
+  await Promise.all([a.open(), b.open()]);
+  await a.hello();
+  await b.hello();
+  await a.wait('welcome');
+  await b.wait('welcome');
+  a.send({ t: 'ranked' });
+  b.send({ t: 'ranked' });
+  const ra = await a.wait('room', (m) => !!m.ranked && !!m.players[0] && !!m.players[1]);
+  const names = ra.players.map((p) => p!.name).sort();
+  assert.deepEqual(names, ['RA', 'RB']);
+  await a.wait('start');
+  b.send({ t: 'leave' });
+  const [x, y] = await Promise.all([a.wait('rating'), b.wait('rating')]);
+  assert.ok(x.delta > 0 && y.delta < 0);
+  // レート戦は再戦なし
+  a.send({ t: 'rematch' });
+  a.close();
+  b.close();
+});
+
+test('レート戦のCPUは実際に戦う（放置すると負ける）', { timeout: 60000 }, async () => {
+  const c = new TestClient('Idle');
+  await c.open();
+  await c.hello('classic', 'cork');
+  await c.wait('welcome');
+  c.send({ t: 'ranked' });
+  const room = await c.wait('room', (m) => !!m.ranked && !!m.players[0] && !!m.players[1], 5000);
+  await c.wait('start');
+  const end = await c.wait('end', () => true, 50000);
+  const botIdx = 1 - room.you;
+  assert.ok(end.stats[botIdx].dealt > 0, 'CPUがダメージを与えた');
+  assert.notEqual(end.winner, room.you, '放置したほうは勝てない');
+  const rt = await c.wait('rating');
+  assert.ok(rt.delta <= 0);
   c.close();
 });

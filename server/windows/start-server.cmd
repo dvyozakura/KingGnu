@@ -9,7 +9,7 @@ setlocal
 cd /d "%~dp0..\.."
 if not defined PORT set PORT=8787
 set HOST=127.0.0.1
-set ALLOWED_ORIGINS=https://dvyozakura.github.io,http://localhost:5173
+set ALLOWED_ORIGINS=https://dvyozakura.github.io,http://localhost:5173,capacitor://localhost,https://localhost
 if not exist "server\logs" mkdir "server\logs"
 
 rem already running? then do nothing

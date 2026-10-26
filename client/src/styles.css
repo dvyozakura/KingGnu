@@ -1096,3 +1096,232 @@ button.link:focus-visible {
 .badge.ban {
   background: #555;
 }
+
+/* ---------------- アカウント・ショップ ---------------- */
+.emeralds {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 900;
+  color: #b9ffd6;
+}
+.emerald-icon {
+  flex: none;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.4));
+}
+.title-top {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: 12px;
+  left: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  z-index: 2;
+}
+.title {
+  position: relative;
+}
+.title-top .gem-btn .plus {
+  color: var(--accent);
+  font-weight: 900;
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: #777;
+}
+.dot.online {
+  background: var(--ok);
+}
+.dot.connecting {
+  background: var(--accent);
+}
+.bar-right {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.badge.lock {
+  background: #3d4a42;
+  color: #cfe;
+}
+.card.locked .swatch,
+.card.locked .bar-row {
+  opacity: 0.55;
+}
+.mono {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+.shop-body,
+.skins-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+.shop-body h3 {
+  margin: 0 0 8px;
+}
+.products {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.product {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  background: var(--panel-2);
+  border-radius: 12px;
+  padding: 10px;
+}
+.product-icon {
+  font-size: 1.8rem;
+  text-align: center;
+}
+.product-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.product-text span {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.product button {
+  min-width: 92px;
+}
+.product.owned {
+  opacity: 0.7;
+}
+.unlock-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px;
+}
+.unlock-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border-radius: 10px;
+}
+.unlock-item .small,
+.muted.small {
+  font-size: 0.8rem;
+}
+.unlock-item button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.skin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+.skin-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+}
+.skin-card.selected {
+  border-color: var(--accent);
+}
+.skin-card button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.slot-item {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--panel-2);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.slot-item.empty {
+  opacity: 0.8;
+}
+.slot-no {
+  font-weight: 900;
+  color: var(--muted);
+  text-align: center;
+}
+.panel.bonus {
+  align-items: center;
+  text-align: center;
+  min-width: 260px;
+}
+.bonus-gem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 2.4rem;
+  color: #7dffb3;
+  animation: pop 0.5s ease-out;
+}
+@keyframes pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.panel.account {
+  min-width: min(420px, 92vw);
+}
+button.signin {
+  font-weight: 800;
+}
+button.signin.apple {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+button.signin.google {
+  background: #fff;
+  color: #333;
+  border-color: #ddd;
+}
+@media (max-width: 480px) {
+  .title-top {
+    justify-content: space-between;
+  }
+  .title-top button {
+    padding: 6px 8px;
+    font-size: 0.8rem;
+  }
+}

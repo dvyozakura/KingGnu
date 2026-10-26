@@ -2,29 +2,71 @@
  * Node.js 常駐 WebSocket サーバー
  *   既定: 127.0.0.1:8787 で待ち受け（Cloudflare Tunnel 経由でだけ外部公開する）
  *   環境変数: PORT / HOST / ALLOWED_ORIGINS（カンマ区切り）/ MAX_CONN_PER_IP
+ *             DATA_DIR（アカウントの保存先）/ REVENUECAT_SECRET_KEY / APPLE_BUNDLE_IDS / GOOGLE_CLIENT_IDS / ALLOW_TEST_PURCHASES
+ *   server/.env.local があれば読み込む（秘密情報はここに書く。Git には入らない）
  */
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { MAX_PACKET_BYTES } from '@kinggnu/shared';
 import { Client, GameServer } from './core/gameServer';
+import { AccountService } from './core/accounts';
+import { IdTokenVerifier, type FetchJson } from './core/auth';
+import { RevenueCatVerifier } from './core/iap';
+import { FileAccountStore } from './core/store';
+
+// server/.env.local（KEY=VALUE 形式）。既に設定済みの環境変数は上書きしない
+for (const f of ['server/.env.local', '.env.local']) {
+  if (!existsSync(f)) continue;
+  for (const line of readFileSync(f, 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+  break;
+}
 
 const PORT = Number(process.env.PORT ?? 8787);
 /** トンネル（cloudflared）からだけ届くよう、既定はループバックのみ */
 const HOST = process.env.HOST ?? '127.0.0.1';
 /** 許可するフロントエンドの Origin（パスは付けない） */
-const DEFAULT_ORIGINS = 'https://dvyozakura.github.io,http://localhost:5173';
+const DEFAULT_ORIGINS = 'https://dvyozakura.github.io,http://localhost:5173,capacitor://localhost,https://localhost';
 const ORIGINS = (process.env.ALLOWED_ORIGINS ?? DEFAULT_ORIGINS)
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 const MAX_PER_IP = Number(process.env.MAX_CONN_PER_IP ?? 8);
 
-const game = new GameServer({ log: (...a) => console.log(new Date().toISOString(), ...a) });
+const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a);
+const list = (v: string | undefined) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+const fetchJson: FetchJson = (url, init) => fetch(url, init);
+
+const DATA_DIR = process.env.DATA_DIR ?? (existsSync('server') ? 'server/data' : 'data');
+const store = new FileAccountStore(DATA_DIR, log);
+const rcKey = process.env.REVENUECAT_SECRET_KEY ?? '';
+const accounts = new AccountService(store, new IdTokenVerifier(fetchJson), rcKey ? new RevenueCatVerifier(rcKey, fetchJson) : null, {
+  appleAudiences: list(process.env.APPLE_BUNDLE_IDS ?? 'jp.yein.kinghorn'),
+  googleAudiences: list(process.env.GOOGLE_CLIENT_IDS),
+  allowTestPurchases: process.env.ALLOW_TEST_PURCHASES === '1',
+});
+if (!rcKey) log('REVENUECAT_SECRET_KEY が未設定のため、課金の確認は無効です');
+if (accounts.opts.allowTestPurchases) log('注意: ALLOW_TEST_PURCHASES=1（テスト購入が有効。本番では外すこと）');
+
+const game = new GameServer({ log }, accounts);
+
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
+  process.on(sig, () => {
+    try {
+      store.flush();
+    } finally {
+      process.exit(0);
+    }
+  });
+}
 
 const http = createServer((req, res) => {
   if (req.url === '/health' || req.url === '/') {
     res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
-    res.end(JSON.stringify({ ok: true, name: 'kinggnu', ...game.stats }));
+    res.end(JSON.stringify({ ok: true, name: 'kinghorn', ...game.stats }));
     return;
   }
   res.writeHead(404);
@@ -102,5 +144,5 @@ http.on('error', (e: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 http.listen(PORT, HOST, () =>
-  console.log(`KingGnu server listening on http://${HOST}:${PORT} (ws path /ws, origins: ${ORIGINS.join(', ')})`),
+  console.log(`King Horn server listening on http://${HOST}:${PORT} (ws path /ws, origins: ${ORIGINS.join(', ')})`),
 );
